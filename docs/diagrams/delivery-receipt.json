@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "architecture",
+  "input": "wenxu-layers.architecture.json",
+  "output": "wenxu-layers.html",
+  "specification": {
+    "sha256": "03d01414c0da657a6818ec63264740bf016958c8469140f535eb823a46cc2630",
+    "bytes": 3366
+  },
+  "artifact": {
+    "sha256": "00e3553f807553fa2be22801d11951147950df8538be17184711ede35bb2efee",
+    "bytes": 809426
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  }
+}

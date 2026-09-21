@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "文序技术分层建议",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "animation": "none",
+    "viewBox": [1240, 730]
+  },
+  "components": [
+    {"id": "edit_ui", "type": "frontend", "label": "交互层", "sublabel": "全局控件 · 局部选区 · 文字要求", "pos": [35, 70], "size": [235, 86]},
+    {"id": "intent_adapter", "type": "backend", "label": "输入理解层", "sublabel": "统一范围、属性、数值与例外", "pos": [345, 70], "size": [235, 86]},
+    {"id": "edit_planner", "type": "backend", "label": "定位与修改计划层", "sublabel": "合并目标 · 处理冲突 · 用户确认", "pos": [655, 70], "size": [235, 86]},
+    {"id": "patch_engine", "type": "backend", "label": "精确修改引擎", "sublabel": "按确认计划仅修改指定属性", "pos": [965, 70], "size": [235, 86]},
+    {"id": "template_rules", "type": "backend", "label": "模板与规范层", "sublabel": "可选预设 · 参考实例 · 批注要求", "pos": [345, 320], "size": [235, 86]},
+    {"id": "document_model", "type": "backend", "label": "文档解析与结构层", "sublabel": "上传稿件 → 对象、角色与格式", "pos": [655, 320], "size": [235, 86]},
+    {"id": "render_adapter", "type": "backend", "label": "渲染层", "sublabel": "LibreOffice → PDF 与页面图片", "pos": [965, 320], "size": [235, 86]},
+    {"id": "revision_store", "type": "database", "label": "任务与版本管理", "sublabel": "原稿 · 计划快照 · 新版本与报告", "pos": [655, 570], "size": [235, 86]},
+    {"id": "verification_gate", "type": "security", "label": "校验与交付检查层", "sublabel": "内容保全 · 目标格式 · 版式复核", "pos": [965, 570], "size": [235, 86]}
+  ],
+  "connections": [
+    {"id": "ui_to_intent", "from": "edit_ui", "to": "intent_adapter", "label": "1. 修改请求", "variant": "emphasis"},
+    {"id": "intent_to_plan", "from": "intent_adapter", "to": "edit_planner", "label": "2. 候选意图", "variant": "emphasis"},
+    {"id": "template_to_intent", "from": "template_rules", "to": "intent_adapter", "label": "2a. 采用规则", "variant": "dashed"},
+    {"id": "model_to_plan", "from": "document_model", "to": "edit_planner", "label": "2b. 结构快照"},
+    {"id": "plan_to_patch", "from": "edit_planner", "to": "patch_engine", "label": "3. 确认计划", "variant": "emphasis"},
+    {"id": "patch_to_render", "from": "patch_engine", "to": "render_adapter", "label": "4. 候选副本", "variant": "emphasis", "labelAt": [1083, 238]},
+    {"id": "render_to_verify", "from": "render_adapter", "to": "verification_gate", "label": "5. 页面结果", "variant": "emphasis", "labelAt": [1083, 488]},
+    {"id": "verify_to_revision", "from": "verification_gate", "to": "revision_store", "label": "6. 通过后提交", "variant": "security"}
+  ],
+  "cards": [
+    {"dot": "cyan", "title": "共同约定", "items": ["按钮和文字共用一份修改计划", "未指定的属性保持原样"]},
+    {"dot": "emerald", "title": "质量关口", "items": ["渲染前先做内容与对象保全检查", "渲染成功与版式复核分别记录"]},
+    {"dot": "violet", "title": "实现边界", "items": ["逻辑分层，首版仍为单体应用", "任务管理贯穿全程，失败不覆盖原稿"]}
+  ]
+}

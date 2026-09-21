@@ -1,0 +1,3 @@
+# Preserve the exact bytes bound to the Archify delivery receipt.
+wenxu-layers.architecture.json -text
+wenxu-layers.html -text
