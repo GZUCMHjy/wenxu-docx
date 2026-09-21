@@ -42,7 +42,7 @@ def _xml(raw):
     return root
 
 
-def _package(data):
+def _package(data, *, preservation_profile=False):
     if not data or len(data) > MAX_FILE_BYTES:
         raise FormatError("请上传非空 DOCX 文件，大小不超过 10 MB。")
     try:
@@ -72,9 +72,11 @@ def _package(data):
         if root.tag != qn("w:document") or root.find("w:body", NS) is None:
             raise FormatError("文档主体格式不受支持。")
         unsupported = {"ins", "del", "moveFrom", "moveTo", "sdt", "altChunk", "txbxContent", "object", "fldSimple", "fldChar", "footnoteReference", "endnoteReference", "commentRangeStart", "commentReference", "customXml"}
+        if preservation_profile:
+            unsupported -= {"object", "fldSimple", "fldChar", "footnoteReference", "endnoteReference", "commentRangeStart", "commentReference"}
         if any(etree.QName(e).localname in unsupported or etree.QName(e).localname.endswith("PrChange") for e in root.iter() if isinstance(e.tag, str)):
             raise FormatError("暂不支持含修订、批注、文本框、域、内容控件或嵌入对象的正文。")
-        if root.xpath(".//*[local-name()='oMath' or local-name()='oMathPara']"):
+        if not preservation_profile and root.xpath(".//*[local-name()='oMath' or local-name()='oMathPara']"):
             raise FormatError("暂不支持公式排版。")
         settings = parts.get("word/settings.xml")
         if settings:

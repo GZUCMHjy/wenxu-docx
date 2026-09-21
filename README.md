@@ -1,102 +1,67 @@
-# 文序 DOCX 格式纠正 POC
+# 文序 Word 格式调整工具
 
-本仓库实现《文序产品需求完整汇总版 v0.5》的 POC 主链路：导入自己的 DOCX，通过文字要求或参考实例生成要求表，人工核对对象、范围和规则，确认后只修改被选中的格式属性，完成内容、规则、文件和 Linux 渲染检查，再另存 DOCX 与独立 HTML 报告。
+v0.6 在本地处理已有 DOCX 或旧式 DOC，通过全局控件、搜索与字符选择、段落或表格栏目定位，只修改本次明确指定的格式。以 master 的产品需求和架构为基线，实施计划、契约及测试记录均保存在仓库中。
 
-当前 POC 已覆盖 F01–F06 的软件流程。个人规范库、跨会话历史、组织发布和批量任务属于 F07–F10，按 PRD 留到第一期或第二期。
+- [产品与架构入口](docs/README.md)
+- [开发计划与 spec](docs/specs/v06-editing.md)
+- [实施状态和验收记录](docs/verification/v06.md)
+- [v0.5 历史运行说明](docs/archive/v05-runtime.md)
 
-## 产品目标与技术设计
-
-文序的下一阶段目标是：用户上传已经写好的 Word 文档，通过全局格式按钮或局部选择、文字要求，准确修改指定位置和属性，保留其余内容、格式与对象。
-
-完整定义见 [产品与技术文档入口](docs/README.md)：
-
-- [产品目标与需求定位](docs/PRODUCT.md)
-- [v0.6 需求与验收场景](docs/REQUIREMENTS.md)
-- [整体架构、分层能力与现有代码差距](docs/ARCHITECTURE.md)
-- [交互架构图、JSON 图源和验证说明](docs/diagrams/README.md)
-
-v0.6 是后续实现的目标基线。本页以下仍描述 v0.5 POC 的实际用法与限制；精确字符选择、表格栏目定位、DOC 转换和复杂对象保全等新目标尚未全部实现。
-
-## WSL 安装与启动
-
-所有编译、运行和验收都在 WSL Ubuntu 中执行。代码可以位于 `/mnt/d/`，虚拟环境应放在 Linux 文件系统中。
+## WSL 启动
 
 ```bash
 cd /mnt/d/vibe-project/wenxu-docx
-
-# Ubuntu 中安装 Linux 渲染器和中文字体
-sudo apt update
-sudo apt install -y libreoffice fonts-noto-cjk
-
-# 已安装 uv 时可跳过这一行
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
 uv venv --python python3 "$HOME/.cache/wenxu-docx/venv"
 uv pip install --python "$HOME/.cache/wenxu-docx/venv/bin/python" -r requirements.txt
-
+# 安装 Linux LibreOffice 与所需字体，或指定已有的 Linux 便携版。
 export WENXU_LIBREOFFICE="$(command -v libreoffice)"
 "$HOME/.cache/wenxu-docx/venv/bin/python" -m streamlit run app.py \
   --server.address 127.0.0.1 --server.port 8501 --browser.gatherUsageStats false
 ```
 
-打开 [http://localhost:8501](http://localhost:8501)。如果没有 sudo 权限，可把官方 Linux LibreOffice 解压到用户目录，把 `WENXU_LIBREOFFICE` 指向其中的 `program/soffice`；字体可放入 `~/.local/share/fonts/` 后执行 `fc-cache -f`。
+打开 [本地应用](http://localhost:8501)。现有环境有虚拟环境时，直接安装更新后的依赖即可。不要在已有环境上重建虚拟环境。程序与测试在 WSL/Linux 内运行；源代码可在 Windows 磁盘。
+
+旧版文字/参考实例工作流保留在 `legacy_app.py`，同一服务访问 [旧版入口](http://localhost:8501/?legacy=1)。旧版支持范围未扩大。
 
 ## 使用流程
 
-1. 上传自己的 DOCX；文字要求和参考实例 DOCX 是并列入口，可单独使用或同时使用。
-2. 点击“提取要求并生成核对表”。无法识别、缺对象/单位或互相冲突的内容会保留为待处理项。
-3. 核对每段的标题、正文、落款或原样保留角色，再核对要求表的对象、属性、目标值、单位和来源。
-4. 确认当前快照后执行。任何输入、要求或范围变化都会撤销旧确认和旧结果。
-5. 检查通过后下载 `原名_vN.docx`、HTML 检查报告或诊断 JSON；可从任一会话内结果继续生成下一个未占用版本。
+1. 上传自己的 DOCX 或 DOC。DOC 先生成独立工作副本，核对转换前后预览和差异后再采用；保留原始上传文件。
+2. 核对需要的段落角色和保护区。全局正文默认包含表格内正文；表头和栏目标签不自动归入正文，待归类项明确提示。
+3. 全局选正文/标题/表格等范围，或局部搜索文字、选段落字符区间、栏目填写区、表格行列和合并单元格。
+4. 选择本次要设置的属性。未选择的保持原样；加粗、斜体、下划线支持保持/开启/关闭。当前格式与本次目标分开展示。
+5. 将控件设置、文字要求或明确采用的参考格式加入清单，查看命中位置、目标属性、局部例外、保护排除和冲突。可改目标值、取消一项或移除命中段落。
+6. 点击“应用修改并检查”，系统先检查内容、对象和目标属性，再渲染前后页面。全部已满足时不生成重复版本。
+7. 查看页面并确认接受版式后下载新 DOCX；HTML 报告独立下载。继续调整自动基于当前版本，控件恢复保持原样；撤销回到上一个版本。
 
-重复执行同一输入与规则快照会复用结果。全部要求已经满足时提示无需修改，不创建重复版本。下载不覆盖原稿；已提交、被退回和已接收是用户记录的交付观察。
+文字输入采用确定性有限语法，例如“正文宋体小四，但第三段黑体”“教学目标这一栏改黑体五号”。不完整或未理解的内容保留为待处理项，不执行正文、批注中出现的指示。
 
-## POC 支持范围
+## 支持与校验边界
 
-- 单个普通 DOCX，不超过 10 MB；解压后不超过 60 MB、2000 个部件。
-- 单节 A4 纵向，渲染后不超过 50 页。
-- 文档标题、一级至三级标题、正文、落款和用户指定的原样保留段落。
-- 字体、字号、加粗、斜体、RGB 颜色、对齐、首行/左右缩进、段前/段后、固定或倍数行距、与下段同页、四边页边距。
-- 已有 run、超链接和简单表格中的段落；普通图片、页眉、页脚、关系和其他包部件按原字节保全。
-- 有效格式计算覆盖直接格式、字符/段落样式和样式继承。已满足目标值时不增加冗余直接格式。
+- 普通 DOCX / 受控转换的二进制 DOC，10 MB 文件上限，60 MB 解压上限，2000 部件，单节，渲染 1–50 页。
+- 字符：字体（全部/仅中文/仅西文）、字号、加粗、斜体、单线下划线、RGB 颜色；可跨多个 run 精确选择。
+- 段落：对齐、首行/左右缩进、段前/段后、固定/倍数行距、与下段同页。局部选字设置段落属性会显示整段影响。
+- 页面：单节四边页边距。表格逻辑行列考虑横向/纵向合并；不自动重排列宽和边框。
+- 图片、原生公式、批注、字段、嵌入对象、表格合并、页眉页脚按原结构/部件保留；其内部内容不开放编辑。
+- 修订、文本框、内容控件、多节、宏、签名、外部模板和外链对象等未验证结构继续拒绝。
 
-POC 会阻断 DOC、损坏/加密文件、宏、数字签名、多节或非 A4 纵向文档，以及正文中的修订、批注、域、内容控件、文本框、公式、嵌入对象、外部模板或外链图片。普通网页超链接保留且不会访问目标。
+写回只替换 `word/document.xml`。其他 ZIP 部件原字节保留；独立校验器把 run 拆分归一到字符，检查文字顺序、对象、非目标属性和实际目标值。公式、字段和嵌入对象不参与普通文本格式操作。
 
-结构识别以已有样式、大纲级别和文本位置为依据。弱证据会显示原文并交给用户确认，不显示伪精确置信度。POC 不改写正文、不新增或重排标题编号，也不自动套用所谓标准公文格式。
+目标字体缺失、结构/保全失败或渲染失败均不登记可下载版本。已有字体缺失可能发生替代，报告明确披露。自动校验、Linux 渲染、人工版式复核和 Word/WPS 客户端兼容性是不同状态。DOC 转换本身可能改变内容或排版，不能用转换之后的保全检查冒充原始 DOC 无损转换证明。
 
-## 检查与数据处理
-
-写回只替换 DOCX 包内 `word/document.xml`，其他部件保持原字节。校验器会：
-
-- 比较正文字符、对象和未选择属性；
-- 逐段检查确认规则的有效格式；
-- 重新打开输出 DOCX；
-- 用 Linux LibreOffice 转换输入和输出，并用 PyMuPDF 生成逐页预览；
-- 在要求字体未安装、内容/关系丢失、规则未达到或渲染失败时阻断 DOCX 下载。
-
-HTML 报告记录任务 ID、输入指纹、来源版本、规则与来源、应用范围、排除项、保留区域、检查结果、时间和实际处理环境。报告不会写入 DOCX 正文。
-
-稿件、规则、版本和渲染结果仅保存在当前 Streamlit 会话内存或渲染调用的临时目录中；临时目录在调用结束时删除。关闭服务后不提供恢复能力，这是第一期 F08 的范围。
-
-## WSL 验收
+## 本地验证
 
 ```bash
-cd /mnt/d/vibe-project/wenxu-docx
 PY="$HOME/.cache/wenxu-docx/venv/bin/python"
-
-# 单元与故障注入
 "$PY" -m unittest discover -s tests -v
-
-# 真实浏览器：先保持应用运行
 uv pip install --python "$PY" -r requirements-dev.txt
 "$PY" -m playwright install chromium
-"$PY" tests/browser_smoke.py
+# 保持应用运行后执行实际浏览器验证
+"$PY" tests/v06_browser.py
+"$PY" tests/v06_doc_browser.py
 
-# 30 份合成矩阵，必须设置 Linux LibreOffice
-export WENXU_LIBREOFFICE="$(command -v libreoffice)"
-"$PY" tests/poc_acceptance.py
+# 可选真实稿件验证；产物目录必须在仓库外
+"$PY" tests/local_sample_acceptance.py /absolute/local/sample.doc \
+  --output-dir /absolute/local/private-validation
 ```
 
-`browser_smoke.py` 验证真实上传、要求拆分、确认失效、Linux 渲染、v1 下载、HTML 报告和从 v1 局部调整得到 v2。`poc_acceptance.py` 验证 3 类、30 份合成文档，覆盖 10 组要求变更、20/10 开发与留出分组、三次幂等应用和逐份 Linux 渲染。运行证据写入被 Git 忽略的 `verification/`，已执行结果见 [VERIFICATION.md](VERIFICATION.md)。
-
-合成证据不能替代真实试点材料或 Word/WPS 客户端验收。尚未实际验证的客户端和复杂文档不宣称兼容。
+项目关闭浏览器使用统计，只监听本机。稿件、转换副本、版本和预览保存在当前会话内存或临时目录；不调用云端模型/文档转换服务，不提供跨会话恢复。真实稿件、正文、批注、转换件及截图禁止进入 Git；仓库测试使用合成文档。私人验证脚本强制把输出保存在仓库外。
