@@ -58,6 +58,7 @@ uv pip install --python "$PY" -r requirements-dev.txt
 # 保持应用运行后执行实际浏览器验证
 "$PY" tests/v06_browser.py
 "$PY" tests/v06_doc_browser.py
+"$PY" tests/v06_import_render.py
 
 # 可选真实稿件验证；产物目录必须在仓库外
 "$PY" tests/local_sample_acceptance.py /absolute/local/sample.doc \

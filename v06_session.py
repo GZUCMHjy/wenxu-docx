@@ -19,6 +19,7 @@ from docx_formatting import FormatError, MAX_FILE_BYTES, NS, _xml
 from prd_formatting import safe_stem
 from prd_workflow import installed_font_families
 from v06_model import build_model, digest
+from v06_import import IMPORT_VERSION, compare_rendered_text, repair_imported_picture_groups
 from v06_patch import ENGINE_VERSION, patch_document, verify_result
 from v06_plan import encode
 
@@ -147,9 +148,12 @@ class EditingSession:
         if extension == ".doc":
             inventory = validate_doc(data)
             baseline = converter(data, "doc", 'docx:Office Open XML Text')
+            baseline, repairs = repair_imported_picture_groups(baseline)
             converted = build_model(baseline)
             old, new = renderer(data, "doc"), renderer(baseline, "docx")
-            conversion = {"status": "converted", "visual_review": "pending", "original_hash": digest(data), "working_hash": digest(baseline), "source_pages": old["pages"], "working_pages": new["pages"], "source_inventory": inventory, "working_inventory": converted.inventory, "rendered_text_equal": "".join(old["text"].split()) == "".join(new["text"].split()), "limitation": "转换前后需独立复核，最小修改保证仅相对 DOCX 工作副本；未证明 DOC 转换无损。"}
+            text_check = compare_rendered_text(old, new)
+            blockers = [f"转换后预览有 {text_check['missing_count']} 个字符未检出，需先解决转换差异。"] if text_check["missing_count"] else []
+            conversion = {"status": "converted", "visual_review": "pending", "import_version": IMPORT_VERSION, "original_hash": digest(data), "working_hash": digest(baseline), "source_pages": old["pages"], "working_pages": new["pages"], "source_inventory": inventory, "working_inventory": converted.inventory, "rendered_text_equal": text_check["sequence_equal"], "text_check": text_check, "repairs": repairs, "blocking_issues": blockers, "limitation": "DOC 导入会先转换成 DOCX，尚未执行格式修改。请核对转换前后页面；文字检查通过也不代表版式或所有对象完全一致。"}
             renders["conversion_source"], renders["conversion_working"] = old, new
         elif extension != ".docx":
             raise FormatError("只支持 DOCX 和受控转换的 DOC。")
@@ -181,6 +185,8 @@ class EditingSession:
     def execute(self, model, plan, *, environment=None):
         if model.revision != self.current or model.data != self.versions[self.current].data:
             raise FormatError("当前输入已切换，旧计划已失效。")
+        if self.conversion.get("blocking_issues"):
+            raise FormatError("；".join(self.conversion["blocking_issues"]))
         if self.conversion["visual_review"] == "pending":
             raise FormatError("请先核对 DOC 转换的独立工作基线。")
         env = environment or render_environment()

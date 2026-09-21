@@ -12,6 +12,7 @@ from v06_model import ROLE_LABELS, build_model, digest
 from v06_patch import current_values
 from v06_plan import build_plan, encode, intent, parse_text, resolve_scope
 from v06_session import EditingSession, report_html
+from v06_import import IMPORT_VERSION
 
 LABELS = {**PROPERTY_LABELS, "font_family": "字体（中文与西文）", "font_east_asia": "字体（仅中文）", "font_western": "字体（仅西文）", "underline": "下划线"}
 
@@ -137,7 +138,7 @@ def main():
         st.info("上传后，可直接统一正文格式，也可搜索文字、选择段落或表格填写区。")
         st.caption("v0.6 · 当前支持范围和运行说明见仓库 README；旧版参考工作流可通过 ?legacy=1 打开。")
         return
-    identity = digest(uploaded.getvalue()) + uploaded.name
+    identity = IMPORT_VERSION + digest(uploaded.getvalue()) + uploaded.name
     if st.session_state.get("upload_identity") != identity:
         st.session_state.pop("editor", None)
         try:
@@ -158,8 +159,19 @@ def main():
                 _preview_pages(session.renders["conversion_source"], "原始 DOC 预览", "conversion_old")
             with c2:
                 _preview_pages(session.renders["conversion_working"], "DOCX 工作副本预览", "conversion_new")
-            st.write("渲染可见文字一致：", session.conversion["rendered_text_equal"])
-            if st.checkbox("已核对转换前后页面，接受此工作副本", key="conversion_accept"+identity):
+            repairs = session.conversion.get("repairs", [])
+            if repairs:
+                st.info(f"已修复组合图片的显示兼容性，共 {sum(r['pictures'] for r in repairs)} 张；原图片内容保持不变。")
+            text_check = session.conversion["text_check"]
+            blocked = bool(session.conversion.get("blocking_issues"))
+            if blocked:
+                for issue in session.conversion["blocking_issues"]:
+                    st.error(issue)
+            elif text_check["sequence_equal"]:
+                st.success("转换前后提取的可见文字一致，仍需核对页面和公式图片。")
+            else:
+                st.warning(f"预览文字的读取顺序或数量存在差异：未检出 {text_check['missing_count']} 个字符，额外检出 {text_check['added_count']} 个字符。请结合页面核对，不能据此认定内容完全一致。")
+            if st.checkbox("已核对转换前后页面，接受此工作副本", key="conversion_accept"+identity, disabled=blocked) and not blocked:
                 session.conversion["visual_review"] = "confirmed"
             else:
                 session.conversion["visual_review"] = "pending"
@@ -284,7 +296,7 @@ def main():
                 st.dataframe(review.excluded, hide_index=True)
         if review.preview:
             st.dataframe([{"段落": a["pid"], "字符区间": f"{a['start']}–{a['end']}" if a["end"] else "整段/页面", "属性": LABELS.get(a["property"], a["property"]), "目标": str(a["value"]), "来源项": str(a["sources"])} for a in review.preview], hide_index=True, width="stretch")
-        if st.button("应用修改并检查", type="primary", disabled=not review.plan or session.conversion["visual_review"] == "pending"):
+        if st.button("应用修改并检查", type="primary", disabled=not review.plan or session.conversion["visual_review"] == "pending" or bool(session.conversion.get("blocking_issues"))):
             try:
                 with st.spinner("修改副本，校验内容和对象，生成前后预览…"):
                     result, created = session.execute(model, review.plan)
