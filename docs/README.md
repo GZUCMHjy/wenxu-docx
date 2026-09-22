@@ -2,6 +2,8 @@
 
 Windows 桌面产品线见 [桌面版 spec 与 LTS 约定](specs/windows-desktop-lts.md)、[使用与打包说明](desktop-quickstart.md) 及 [验收记录](verification/windows-desktop.md)。桌面界面直接复用现有核心，与以下网页交互基线分别维护。
 
+可插拔双引擎方案见 [WPS / LibreOffice 技术方案](specs/standalone-document-engine.md)：默认优先本机 WPS，无可用 WPS 时使用内置 LibreOffice，也允许用户手动选择。该方案位于 `feature/standalone-document-engine`，目前仅完成设计，尚未实现或通过新引擎验收。
+
 本文档集面向产品、研发与验收人员，明确文序从 POC 走向真实文档格式调整工具的目标。基线日期为 2026-09-21。
 
 **产品目标：让用户通过全局按钮或局部要求，准确调整已经写好的 Word 文档，只改变明确指定的位置和属性。**
