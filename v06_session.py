@@ -250,9 +250,11 @@ class EditingSession:
         after = self.renders.get(new_key) or self.renderer(output, source.extension)
         checks["render"] = "passed"
         checks["delivery_status"] = "pending_visual_review"
+        page_check = compare_rendered_pages(before, after)
         v_id = "v" + str(self.next_number)
         stem, _ = safe_stem(self.original_name)
         report = {"version": v_id, "parent": self.current, "input_hash": digest(source.data), "index_hash": model.source_hash, "output_hash": digest(output), "source_format": source.extension, "output_format": source.extension, "plan_hash": plan.plan_hash, "engine_version": NATIVE_VERSION if source.extension == 'doc' else ENGINE_VERSION, "created_at": datetime.now(timezone.utc).isoformat(), "plan": frozen, "operations": operations, "checks": checks, "environment": env, "font_warnings": source_font_warnings(model, env), "pages_before": before["pages"], "pages_after": after["pages"], "conversion": self.conversion.copy()}
+        report['page_check'] = page_check
         protections = [{**p, "revision": v_id} for p in frozen["protections"]]
         version = Version(v_id, f"{stem}_{v_id}.{source.extension}", output, self.current, plan.plan_hash, encode(report), encode(protections), encode(model.role_overrides), analysis_data, encode(mapping))
         self.versions[v_id] = version

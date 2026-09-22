@@ -18,7 +18,7 @@ PKG = 'http://schemas.microsoft.com/office/2006/xmlPackage'
 CT = 'http://schemas.openxmlformats.org/package/2006/content-types'
 W = NS['w']
 W14 = 'http://schemas.microsoft.com/office/word/2010/wordml'
-NATIVE_VERSION = 'native-doc-1'
+NATIVE_VERSION = 'native-doc-2'
 
 
 def snapshot_package(flat):
@@ -209,7 +209,7 @@ def _ole_payload(raw):
         return items
 
 
-def _font_table_equal(before, after, assignments):
+def _font_table_equal(before, after, assignments, result_parts=None):
     requested = {a['value'] for a in assignments if a['property'] in {'font_east_asia', 'font_western'}}
     def entries(raw):
         root = _xml(raw); fonts = Counter()
@@ -221,8 +221,25 @@ def _font_table_equal(before, after, assignments):
         return fonts
     old, new = entries(before), entries(after)
     # Native editors register newly requested fonts and reorder the table.
-    # Existing font metadata and all unrequested font declarations stay fixed.
-    return not (old - new) and all(name in requested for name, _ in (new - old))
+    # They also discard a font declaration after its last use is replaced.
+    # Scan all XML parts (including styles/themes/headers), not just body runs.
+    # An existing declaration's metadata must still remain unchanged.
+    removed = old - new
+    if removed:
+        if not requested or result_parts is None:
+            return False
+        referenced = {value.casefold() for part, raw in result_parts.items()
+                      if part != 'word/fontTable.xml' and part.endswith('.xml')
+                      for node in _xml(raw).iter() for value in node.attrib.values()}
+        retained = {name.casefold() for name, _ in new}
+        for name, raw in removed:
+            node = _xml(raw)
+            aliases = {name.casefold(), *(n.get('{' + W + '}val', '').casefold() for n in node.findall('w:altName', NS))}
+            # A retained primary name owns its references even if it was also
+            # listed as the deleted font's substitution alias.
+            if name.casefold() in retained or (aliases - retained) & referenced:
+                return False
+    return all(name in requested for name, _ in (new - old))
 
 
 def verify_native_result(model, snapshot, plan):
@@ -237,7 +254,7 @@ def verify_native_result(model, snapshot, plan):
             if name.startswith('word/embeddings/') and before.startswith(bytes.fromhex('D0CF11E0A1B11AE1')):
                 equal = _ole_payload(before) == _ole_payload(after)
             elif name == 'word/fontTable.xml':
-                equal = _font_table_equal(before, after, frozen['assignments'])
+                equal = _font_table_equal(before, after, frozen['assignments'], result.parts)
             elif name.endswith(('.xml', '.rels')):
                 equal = _normalized_xml(name, before, model.parts) == _normalized_xml(name, after, result.parts)
             else:

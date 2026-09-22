@@ -1,5 +1,6 @@
 """Full-page import evidence and the local native adapter's failure boundary."""
 from io import BytesIO
+import json
 import os
 from pathlib import Path
 import subprocess
@@ -15,9 +16,29 @@ from v06_import import compare_rendered_pages
 from v06_office import LocalOffice, native_office
 from v06_plan import build_plan, intent
 from v06_session import EditingSession, _convert
+from test_v06 import sample, ENV
 
 
 class FidelityTests(unittest.TestCase):
+    def test_edit_report_uses_actual_page_changes_including_later_pages(self):
+        original = rendered('same')
+        original['pages'] = 3
+        original['images'] *= 3
+        altered = {**original, 'images': list(original['images'])}
+        image = BytesIO()
+        Image.new('RGB', (10, 10), 'black').save(image, format='PNG')
+        altered['images'][2] = image.getvalue()
+        for after, expected in [(altered, [3]), (original, [])]:
+            with self.subTest(expected=expected):
+                views = iter([original, after])
+                session = EditingSession.load('synthetic.docx', sample(False), renderer=lambda *args: next(views))
+                model = session.model()
+                plan = build_plan(model, [intent(model.scope('all'), {'font_family': '黑体'})]).plan
+                result, _ = session.execute(model, plan, environment=ENV)
+                evidence = json.loads(result.report_json)['page_check']
+                self.assertEqual(evidence['differing_pages'], expected)
+                self.assertEqual(evidence['pixels_equal'], not expected)
+
     def load(self, old, new):
         views = iter([old, new])
         with patch('v06_session.validate_doc', return_value={}):

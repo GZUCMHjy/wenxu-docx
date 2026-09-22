@@ -96,6 +96,22 @@ class NativeTests(unittest.TestCase):
         self.assertFalse(_font_table_equal(before, after, []))
         self.assertFalse(_font_table_equal(before, after.replace(b'<w:font w:name="A"/>', b''), assignment))
 
+    def test_only_unused_font_declarations_may_be_removed_after_font_edit(self):
+        before = f'<w:fonts xmlns:w="{NS["w"]}"><w:font w:name="Old"><w:altName w:val="Alias"/></w:font><w:font w:name="New"/></w:fonts>'.encode()
+        after = f'<w:fonts xmlns:w="{NS["w"]}"><w:font w:name="New"/></w:fonts>'.encode()
+        assignment = [{'property': 'font_east_asia', 'value': 'New'}]
+        parts = {MAIN: f'<w:document xmlns:w="{NS["w"]}"><w:rFonts w:ascii="New"/></w:document>'.encode()}
+        self.assertTrue(_font_table_equal(before, after, assignment, parts))
+        self.assertFalse(_font_table_equal(before, after, [], parts))
+        for part, reference in [(MAIN, 'Old'), ('word/styles.xml', 'old'), ('word/theme/theme1.xml', 'Alias'), ('word/header1.xml', 'Old')]:
+            with self.subTest(part=part):
+                used = {**parts, part: f'<fonts typeface="{reference}"/>'.encode()}
+                self.assertFalse(_font_table_equal(before, after, assignment, used))
+        changed = before.replace(b'w:val="Alias"', b'w:val="Other"')
+        self.assertFalse(_font_table_equal(before, changed, assignment, parts))
+        aliased = before.replace(b'w:val="Alias"', b'w:val="New"')
+        self.assertTrue(_font_table_equal(aliased, after, assignment, parts))
+
     def test_doc_noop_retains_bytes_and_native_failure_is_atomic(self):
         index = sample(False)
         initial = build_model(index)
