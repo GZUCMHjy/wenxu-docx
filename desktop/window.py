@@ -323,15 +323,14 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage("本地处理 · 原格式保存")
         self.setStyleSheet("""
             QMainWindow, QWidget { font-family: 'Microsoft YaHei UI'; font-size: 13px; }
-            QMainWindow { background: #f5f7fa; }
-            QToolBar { padding: 8px; spacing: 9px; background: white; border-bottom: 1px solid #dce3eb; }
+            QToolBar { padding: 8px; spacing: 9px; border-bottom: 1px solid palette(mid); }
             #heading { font-size: 21px; font-weight: 600; padding: 4px 0; }
-            #pageTitle { color: #526172; padding: 4px; }
-            QScrollArea { background: #e4e9ef; border: 1px solid #dce3eb; border-radius: 5px; }
+            #pageTitle { padding: 4px; }
+            QScrollArea { border: 1px solid palette(mid); border-radius: 5px; }
             QComboBox, QLineEdit, QDoubleSpinBox, QSpinBox { min-height: 28px; }
             QPushButton { min-height: 30px; padding: 3px 12px; }
             QPushButton#primary { background: #2563eb; color: white; border: 0; border-radius: 5px; min-height: 38px; }
-            QPushButton#primary:disabled { background: #aebbcf; }
+            QPushButton#primary:disabled { background: palette(button); color: palette(button-text); }
             QTabWidget::pane { border: 0; }
         """)
         self.refresh_enabled()

@@ -19,6 +19,7 @@ from v06_session import EditingSession
 
 try:
     from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtGui import QColor, QPalette
     from PySide6.QtTest import QTest
     from PySide6.QtWidgets import QApplication
     from desktop.window import MainWindow
@@ -108,6 +109,33 @@ class SaveTests(unittest.TestCase):
         self.assertIn("一级标题", labels)
         self.assertNotIn("二级标题", labels)
         self.assertIn("全部表格文字", labels)
+
+
+@unittest.skipUnless(QApplication, "PySide6 is an optional desktop dependency")
+class ThemeTests(unittest.TestCase):
+    def test_dark_palette_keeps_window_toolbar_and_page_title_readable(self):
+        app = QApplication.instance() or QApplication([])
+        original = app.palette()
+        dark = QPalette(original)
+        for role, color in ((QPalette.ColorRole.Window, "#202020"),
+                            (QPalette.ColorRole.WindowText, "#f4f4f4"),
+                            (QPalette.ColorRole.Base, "#303030"),
+                            (QPalette.ColorRole.Text, "#f4f4f4"),
+                            (QPalette.ColorRole.Button, "#303030"),
+                            (QPalette.ColorRole.ButtonText, "#f4f4f4")):
+            dark.setColor(role, QColor(color))
+        app.setPalette(dark)
+        window = MainWindow()
+        try:
+            window.show()
+            app.processEvents()
+            for surface in (window, window.toolbar, window.current_view.scroll):
+                self.assertLess(surface.palette().color(QPalette.ColorRole.Window).lightness(), 128)
+                self.assertGreater(surface.palette().color(QPalette.ColorRole.WindowText).lightness(), 128)
+            self.assertGreater(window.current_view.title.palette().color(QPalette.ColorRole.WindowText).lightness(), 128)
+        finally:
+            window.close()
+            app.setPalette(original)
 
 
 @unittest.skipUnless(QApplication, "PySide6 is an optional desktop dependency")
