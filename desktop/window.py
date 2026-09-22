@@ -333,7 +333,14 @@ class MainWindow(QMainWindow):
             QPushButton#primary:disabled { background: palette(button); color: palette(button-text); }
             QTabWidget::pane { border: 0; }
         """)
+        # Styled child widgets keep their old palette after a Windows theme switch.
+        QApplication.instance().paletteChanged.connect(self.refresh_theme)
         self.refresh_enabled()
+
+    def refresh_theme(self):
+        style = self.styleSheet()
+        self.setStyleSheet("")
+        self.setStyleSheet(style)
 
     def action(self, text, callback, shortcut=None):
         action = QAction(text, self)

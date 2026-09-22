@@ -137,6 +137,39 @@ class ThemeTests(unittest.TestCase):
             window.close()
             app.setPalette(original)
 
+    def test_existing_window_recolors_when_system_palette_changes(self):
+        app = QApplication.instance() or QApplication([])
+        original = app.palette()
+        dark = QPalette(original)
+        light = QPalette(original)
+        for role, dark_color, light_color in (
+            (QPalette.ColorRole.Window, "#202020", "#f0f0f0"),
+            (QPalette.ColorRole.WindowText, "#f4f4f4", "#000000"),
+            (QPalette.ColorRole.Base, "#303030", "#ffffff"),
+            (QPalette.ColorRole.Text, "#f4f4f4", "#000000"),
+            (QPalette.ColorRole.Button, "#303030", "#f0f0f0"),
+            (QPalette.ColorRole.ButtonText, "#f4f4f4", "#000000"),
+        ):
+            dark.setColor(role, QColor(dark_color))
+            light.setColor(role, QColor(light_color))
+        app.setPalette(dark)
+        window = MainWindow()
+        try:
+            window.show()
+            app.processEvents()
+            app.setPalette(light)
+            app.processEvents()
+            for widget in (window.heading, window.notice, window.toolbar, window.current_view.title):
+                self.assertEqual(widget.palette().color(QPalette.ColorRole.WindowText), QColor("#000000"))
+            self.assertEqual(window.current_view.scroll.palette().color(QPalette.ColorRole.Window), QColor("#f0f0f0"))
+            app.setPalette(dark)
+            app.processEvents()
+            self.assertEqual(window.heading.palette().color(QPalette.ColorRole.WindowText), QColor("#f4f4f4"))
+            self.assertEqual(window.current_view.scroll.palette().color(QPalette.ColorRole.Window), QColor("#202020"))
+        finally:
+            window.close()
+            app.setPalette(original)
+
 
 @unittest.skipUnless(QApplication, "PySide6 is an optional desktop dependency")
 class WindowTests(unittest.TestCase):
