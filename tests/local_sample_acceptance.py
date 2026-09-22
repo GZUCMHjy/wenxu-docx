@@ -6,10 +6,9 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from v06_model import build_model, digest
+from v06_model import digest
 from v06_plan import build_plan, intent
-from v06_patch import patch_document, verify_result
-from v06_session import EditingSession, render_environment, render_document, report_html
+from v06_session import EditingSession, render_environment
 
 
 def save_render(root, name, rendered):
@@ -29,49 +28,49 @@ def main():
     dest.mkdir(parents=True, exist_ok=True)
     original = args.source.read_bytes()
     session = EditingSession.load(args.source.name, original)
-    baseline = session.versions["original"].data
-    (dest / "working.docx").write_bytes(baseline)
+    version = session.versions['original']
+    baseline = version.data
+    extension = version.extension
+    assert baseline == original
+    (dest / ('working.' + extension)).write_bytes(baseline)
     env = render_environment()
-    if session.conversion["status"] == "converted":
-        save_render(dest, "original", session.renders["conversion_source"])
-        save_render(dest, "working", session.renders["conversion_working"])
+    if session.conversion['status'] == 'original_format':
+        assert session.conversion['page_check']['pixels_equal']
+        save_render(dest, 'original', session.renders['conversion_source'])
+        save_render(dest, 'working', session.renders['conversion_working'])
     else:
-        save_render(dest, "working", render_document(baseline))
-    m = session.model()
-    # This diagnostic path intentionally does not register a deliverable version
-    # before conversion/visual review. Files are candidates for local inspection.
-    operations = []
+        save_render(dest, 'working', session.preview())
+    model = session.model()
     cases = []
-    available = [c for c in m.columns if c["pids"] and any(m.row(pid)["text"].strip() for pid in c["pids"])]
-    if available:
-        column = available[0]
-        requests = [intent(m.scope("named_column", column_id=column["id"]), {"font_size": 10.5})]
-        plan = build_plan(m, requests).plan
-        candidate, operations = patch_document(m, plan)
-        checks = verify_result(m, candidate, plan)
-        cases.append({"case": "column-fill", "checks": checks, "operations": len(operations)})
-    else:
-        candidate = baseline
-    # Whole-document size reaches text adjacent to all declared preserved types.
-    all_plan = build_plan(m, [intent(m.scope("all"), {"font_size": 12})]).plan
-    output, all_operations = patch_document(m, all_plan)
-    checks = verify_result(m, output, all_plan)
-    (dest / "candidate.docx").write_bytes(output)
-    save_render(dest, "candidate", render_document(output))
-    m2 = build_model(output, "candidate")
-    same_plan = build_plan(m2, [intent(m2.scope("all"), {"font_size": 12})]).plan
-    repeated, repeated_operations = patch_document(m2, same_plan)
-    assert repeated == output and not repeated_operations
-    # Independent local character selection, never derived from comments.
-    p = next(p for p in m.paragraphs if len(p["text"]) >= 8 and not p["protected_spans"])
-    local_plan = build_plan(m, [intent(m.scope("selection", spans=[{"pid": p["pid"], "start": 2, "end": 6}]), {"color": "#FF0000"})]).plan
-    local, local_operations = patch_document(m, local_plan)
-    local_checks = verify_result(m, local, local_plan)
-    cases.extend([{"case": "all-text-size", "checks": checks, "operations": len(all_operations)}, {"case": "four-characters", "checks": local_checks, "operations": len(local_operations)}, {"case": "idempotency", "passed": True}])
-    report = {"source_hash": digest(original), "working_hash": digest(baseline), "output_hash": digest(output), "inventory": m.inventory, "conversion": session.conversion, "environment": env, "cases": cases, "visual_review": "pending", "client_compatibility": "not_run"}
-    (dest / "acceptance.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    requests = []
+    columns = [c for c in model.columns if c['pids'] and any(model.row(pid)['text'].strip() for pid in c['pids'])]
+    if columns:
+        requests.append(('column-fill', intent(model.scope('named_column', column_id=columns[0]['id']), {'font_size': 10.5})))
+    requests.append(('all-text-size', intent(model.scope('all'), {'font_size': 12})))
+    paragraph = next(p for p in model.paragraphs if len(p['text']) >= 8 and not p['protected_spans'])
+    requests.append(('four-characters', intent(model.scope('selection', spans=[{'pid': paragraph['pid'], 'start': 2, 'end': 6}]), {'color': '#FF0000'})))
+    for label, request in requests:
+        session.select('original')
+        plan = build_plan(model, [request]).plan
+        result, created = session.execute(model, plan, environment=env)
+        if result is None:
+            cases.append({'case': label, 'already_satisfied': True}); continue
+        assert created and result.extension == extension
+        (dest / (label + '.' + extension)).write_bytes(result.data)
+        save_render(dest, label, session.preview(result.id))
+        report = json.loads(result.report_json)
+        cases.append({'case': label, 'checks': report['checks'], 'operations': len(report['operations'])})
+        session.select(result.id)
+        updated = session.model()
+        new_scope = {**request['scope'], 'revision': result.id}
+        same = build_plan(updated, [intent(new_scope, request['set'])]).plan
+        assert session.execute(updated, same, environment=env) == (None, False)
+    assert session.versions['original'].data == original
+    report = {'source_hash': digest(original), 'working_hash': digest(baseline), 'inventory': model.inventory,
+              'conversion': session.conversion, 'environment': env, 'cases': cases, 'visual_review': 'pending'}
+    (dest / 'acceptance.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
     assert args.source.read_bytes() == original
-    print(json.dumps({"inventory": m.inventory, "cases": len(cases), "original_preserved": True, "visual_review": "pending"}, ensure_ascii=False))
+    print(json.dumps({"inventory": model.inventory, "cases": len(cases), "original_preserved": True, "visual_review": "pending"}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

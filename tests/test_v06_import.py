@@ -91,7 +91,9 @@ def alter(data, mutate):
 
 
 def rendered(text):
-    return {'text': text, 'pages': 1, 'images': [], 'pdf': b'test-double'}
+    from PIL import Image
+    buf = BytesIO(); Image.new('RGB', (4, 4), 'white').save(buf, format='PNG')
+    return {'text': text, 'pages': 1, 'images': [buf.getvalue()], 'pdf': b'test-double'}
 
 
 class ImportTests(unittest.TestCase):
@@ -140,36 +142,37 @@ class ImportTests(unittest.TestCase):
 
     def test_uploaded_docx_is_not_rewritten(self):
         source = grouped_sample()
-        s = EditingSession.load('synthetic.docx', source, converter=lambda *a: self.fail('DOCX must not be converted'))
+        s = EditingSession.load('synthetic.docx', source, inspector=lambda *a: self.fail('DOCX must not be inspected'))
         self.assertEqual(s.versions['original'].data, source)
         self.assertEqual(s.original, source)
 
-    def test_import_repairs_before_render_and_records_baseline(self):
+    def test_doc_import_retains_actual_bytes_for_both_previews(self):
         seen = []
         def render(data, extension):
             seen.append((data, extension))
-            return rendered('x>y c>0 xc>yc')
-        source = grouped_sample()
+            return rendered('synthetic')
+        snapshot = grouped_sample()
         with patch('v06_session.validate_doc', return_value={}):
-            s = EditingSession.load('synthetic.doc', b'original', converter=lambda *a: source, renderer=render)
-        self.assertEqual(seen[0], (b'original', 'doc'))
-        self.assertEqual(seen[1], (s.versions['original'].data, 'docx'))
-        self.assertNotEqual(seen[1][0], source)
-        self.assertEqual(s.original, b'original')
-        self.assertEqual(s.conversion['repairs'][0]['pictures'], 6)
-        self.assertEqual(s.conversion['visual_review'], 'pending')
-        self.assertEqual(s.conversion['blocking_issues'], [])
+            session = EditingSession.load('synthetic.doc', b'original', inspector=lambda data: (snapshot, []), renderer=render)
+        self.assertEqual(seen, [(b'original', 'doc'), (b'original', 'doc')])
+        self.assertEqual(session.versions['original'].data, b'original')
+        self.assertEqual(session.versions['original'].model_data, snapshot)
+        self.assertEqual(session.conversion['status'], 'original_format')
+        self.assertTrue(session.conversion['byte_identical'])
+        self.assertTrue(session.conversion['page_check']['pixels_equal'])
+        self.assertEqual(session.conversion['blocking_issues'], [])
 
-    def test_missing_rendered_formula_cannot_be_accepted(self):
+    def test_unstable_original_render_cannot_be_accepted(self):
+        views = iter([rendered('body x>y'), rendered('body')])
         with patch('v06_session.validate_doc', return_value={}):
-            s = EditingSession.load('synthetic.doc', b'original', converter=lambda *a: grouped_sample(),
-                                    renderer=lambda data, ext: rendered('body x>y' if ext=='doc' else 'body'))
-        self.assertEqual(s.conversion['text_check']['missing_count'], 3)
-        s.conversion['visual_review'] = 'confirmed'
-        m = s.model(); plan = build_plan(m, [intent(m.scope('all'), {'font_size': 12})]).plan
-        with self.assertRaisesRegex(FormatError, '未检出'):
-            s.execute(m, plan, environment={'font_families': []})
-        self.assertEqual(list(s.versions), ['original'])
+            session = EditingSession.load('synthetic.doc', b'original', inspector=lambda data: (grouped_sample(), []), renderer=lambda *args: next(views))
+        self.assertEqual(session.conversion['text_check']['missing_count'], 3)
+        session.conversion['visual_review'] = 'confirmed'
+        model = session.model()
+        plan = build_plan(model, [intent(model.scope('all'), {'font_size': 12})]).plan
+        with self.assertRaisesRegex(FormatError, '两次独立渲染不一致'):
+            session.execute(model, plan, environment={'font_families': []})
+        self.assertEqual(list(session.versions), ['original'])
 
     def test_text_extraction_order_is_not_treated_as_character_loss(self):
         evidence = compare_rendered_text(rendered('left\nright'), rendered('right left、'))

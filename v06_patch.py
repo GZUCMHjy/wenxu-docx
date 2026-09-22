@@ -323,6 +323,12 @@ def verify_result(model, output, plan):
     assignments = frozen["assignments"]
     if _semantic_tree(model.parts[MAIN], assignments) != _semantic_tree(result.parts[MAIN], assignments):
         raise FormatError("保全失败：内容、对象、范围外或未指定属性发生变化。")
+    _verify_properties(output, assignments)
+    return {"structure": "passed", "properties": "passed", "preservation": "passed", "render": "not_run", "visual_review": "pending", "client_compatibility": "not_run", "inventory": result.inventory}
+
+
+def _verify_properties(output, assignments):
+    """Shared independent target check for OOXML edits and native snapshots."""
     document = Document(BytesIO(output))
     paragraphs = _paragraphs(document.element)
     for a in assignments:
@@ -344,4 +350,3 @@ def verify_result(model, output, plan):
             return value == target
         if not values or not all(same(v) for v in values):
             raise FormatError(f"目标检查失败：段落 {a['pid']} 的 {prop} 未达到计划值。")
-    return {"structure": "passed", "properties": "passed", "preservation": "passed", "render": "not_run", "visual_review": "pending", "client_compatibility": "not_run", "inventory": result.inventory}

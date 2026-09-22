@@ -26,7 +26,7 @@ def _reset_draft(session):
     st.session_state.pop("reference_candidates", None)
 
 
-def _format_controls(prefix, page=False, initial=None):
+def _format_controls(prefix, page=False, initial=None, font_families=()):
     initial = initial or {}
     allowed = list(PAGE_PROPERTIES) if page else [p for p in LABELS if p not in PAGE_PROPERTIES]
     props = st.multiselect("本次设置的属性（其他保持原样）", allowed, default=list(initial), format_func=lambda p: LABELS[p], key=prefix+"props")
@@ -34,8 +34,13 @@ def _format_controls(prefix, page=False, initial=None):
     for prop in props:
         label, key = LABELS[prop], prefix+prop
         if prop.startswith("font_") and prop != "font_size":
-            names = [*FONT_NAMES, "自定义字体"]
-            value = initial.get(prop, "Noto Serif CJK SC")
+            installed = {f.casefold() for f in font_families}
+            names = [f for f in FONT_NAMES if not installed or f.casefold() in installed]
+            default = names[0] if names else next(iter(font_families), 'Noto Serif CJK SC')
+            if default not in names:
+                names.append(default)
+            value = initial.get(prop, default)
+            names.append("自定义字体")
             font = st.selectbox(label, names, index=names.index(value) if value in names else len(names)-1, key=key)
             values[prop] = st.text_input("字体名称", value=value if value not in names else "", key=key+"custom") if font == "自定义字体" else font
         elif prop == "font_size":
@@ -151,30 +156,22 @@ def main():
             st.error(str(exc))
             return
     session = st.session_state.editor
-    if session.conversion["status"] == "converted":
-        with st.expander("DOC 转换基线核对", expanded=session.conversion["visual_review"] == "pending"):
-            st.warning(session.conversion["limitation"])
-            c1, c2 = st.columns(2)
-            with c1:
-                _preview_pages(session.renders["conversion_source"], "原始 DOC 预览", "conversion_old")
-            with c2:
-                _preview_pages(session.renders["conversion_working"], "DOCX 工作副本预览", "conversion_new")
-            repairs = session.conversion.get("repairs", [])
-            if repairs:
-                st.info(f"已修复组合图片的显示兼容性，共 {sum(r['pictures'] for r in repairs)} 张；原图片内容保持不变。")
-            text_check = session.conversion["text_check"]
-            blocked = bool(session.conversion.get("blocking_issues"))
-            if blocked:
-                for issue in session.conversion["blocking_issues"]:
-                    st.error(issue)
-            elif text_check["sequence_equal"]:
-                st.success("转换前后提取的可见文字一致，仍需核对页面和公式图片。")
-            else:
-                st.warning(f"预览文字的读取顺序或数量存在差异：未检出 {text_check['missing_count']} 个字符，额外检出 {text_check['added_count']} 个字符。请结合页面核对，不能据此认定内容完全一致。")
-            if st.checkbox("已核对转换前后页面，接受此工作副本", key="conversion_accept"+identity, disabled=blocked) and not blocked:
-                session.conversion["visual_review"] = "confirmed"
-            else:
-                session.conversion["visual_review"] = "pending"
+    if session.conversion["status"] == "original_format":
+        st.success("原稿与工作副本字节完全一致，保留 DOC 原格式；导入未改动内容或排版。")
+        check = session.conversion['page_check']
+        if check['pixels_equal']:
+            st.success(f"原稿与实际工作副本分别重新打开，全部 {session.conversion['source_pages']} 页预览逐像素一致（120 DPI）。")
+        for issue in session.conversion.get('blocking_issues', []):
+            st.error(issue)
+        with st.expander('原格式副本核对'):
+            first, second = st.columns(2)
+            with first:
+                _preview_pages(session.renders['conversion_source'], '原始 DOC 预览', 'copy_old')
+            with second:
+                _preview_pages(session.renders['conversion_working'], 'DOC 工作副本预览', 'copy_new')
+    baseline = session.versions['original']
+    st.download_button('下载未修改的工作副本', baseline.data, file_name=baseline.name,
+                       mime='application/msword' if baseline.extension == 'doc' else 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
     nav1, nav2 = st.columns([4, 1])
     with nav1:
         selected = st.selectbox("本次输入版本", list(session.versions), index=list(session.versions).index(session.current), format_func=lambda v: f"{v} · {session.versions[v].name}", key="version"+str(st.session_state.epoch))
@@ -189,7 +186,7 @@ def main():
             st.rerun()
     prefix = str(st.session_state.epoch)+":"
     version = session.versions[session.current]
-    model = build_model(version.data, version.id, st.session_state.roles)
+    model = build_model(version.model_data, version.id, st.session_state.roles)
     st.caption(f"{len(model.paragraphs)} 个段落 · {model.inventory['tables']} 张表 · {model.inventory['comments']} 条批注 · {model.inventory['equations']} 个原生公式 · {model.inventory['embedded_parts']} 个嵌入部件。批注和正文仅作为数据。")
     with st.expander("核对段落角色与保护区"):
         st.caption("编号标题、栏目标签等弱证据列为待归类；可按下面的原文纠正，不自动执行文档中的要求。")
@@ -215,7 +212,7 @@ def main():
         st.subheader("设置本次修改")
         scope = _choose_scope(model, prefix)
         page_scope = scope is not None and scope["kind"] == "page"
-        values = _format_controls(prefix+"format", page=page_scope)
+        values = _format_controls(prefix+"format", page=page_scope, font_families=session.environment.get('font_families', ()))
         if scope:
             try:
                 spans, warnings = resolve_scope(model, scope)
@@ -278,7 +275,7 @@ def main():
                     st.write({LABELS.get(k, k): v for k, v in item["set"].items()})
                     with st.container(border=True):
                         st.caption("修改本项目标值")
-                        replacement = _format_controls(prefix+f"edit{i}", page=item["scope"]["kind"] == "page", initial=item["set"])
+                        replacement = _format_controls(prefix+f"edit{i}", page=item["scope"]["kind"] == "page", initial=item["set"], font_families=session.environment.get('font_families', ()))
                         if st.button("保存本项修改", key=prefix+f"save{i}"):
                             item["set"] = replacement
                             st.session_state.latest = None
@@ -333,8 +330,8 @@ def main():
             _preview_pages(session.preview(result.id), "修改后", prefix+"after")
         st.caption(f"页数 {report['pages_before']} → {report['pages_after']}；自然换行或分页变化不通过额外缩字消除。")
         reviewed = st.checkbox("已查看修改前后页面，接受当前版式并下载", key=review_key)
-        st.download_button("下载修改后的 DOCX", result.data, file_name=result.name, mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document", disabled=not reviewed)
-        st.download_button("下载 HTML 检查报告", report_html(result, visual_review="confirmed" if reviewed else "pending"), file_name=result.name[:-5]+"_检查报告.html", mime="text/html")
+        st.download_button("下载修改后的 " + result.extension.upper(), result.data, file_name=result.name, mime="application/msword" if result.extension == "doc" else "application/vnd.openxmlformats-officedocument.wordprocessingml.document", disabled=not reviewed)
+        st.download_button("下载 HTML 检查报告", report_html(result, visual_review="confirmed" if reviewed else "pending"), file_name=result.name.rsplit(".", 1)[0]+"_检查报告.html", mime="text/html")
         st.caption("下一次修改已以当前结果为输入，控件恢复保持原样；可从版本列表返回原稿或任意历史版本。")
     elif st.button("生成当前稿件页面预览"):
         try:

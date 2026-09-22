@@ -9,7 +9,7 @@ from lxml import etree
 
 from docx_formatting import FormatError, _package, _xml
 
-IMPORT_VERSION = "v06-import-2"
+IMPORT_VERSION = "v06-import-4-original-format"
 NS = {
     "w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
     "a": "http://schemas.openxmlformats.org/drawingml/2006/main",
@@ -163,3 +163,32 @@ def compare_rendered_text(before, after):
     added = Counter(new) - Counter(old)
     return {"sequence_equal": old == new, "missing_count": sum(missing.values()), "added_count": sum(added.values()),
             "missing_characters": dict(missing), "added_characters": dict(added)}
+
+
+def compare_rendered_pages(before, after):
+    """Compare actual rasters, including pictures with no extractable text."""
+    from PIL import Image, ImageChops
+    old, new = before['images'], after['images']
+    count_equal = before['pages'] == after['pages']
+    complete = len(old) == before['pages'] and len(new) == after['pages']
+    checks = []
+    for index, (a, b) in enumerate(zip(old, new), 1):
+        with Image.open(BytesIO(a)) as left, Image.open(BytesIO(b)) as right:
+            left, right = left.convert('RGB'), right.convert('RGB')
+            same_size = left.size == right.size
+            box, changed = None, None
+            if same_size:
+                delta = ImageChops.difference(left, right)
+                r, g, b = delta.split()
+                mask = ImageChops.lighter(ImageChops.lighter(r, g), b)
+                box = mask.getbbox()
+                changed = left.width * left.height - mask.histogram()[0]
+            checks.append({'page': index, 'identical': same_size and changed == 0,
+                           'same_size': same_size, 'changed_pixels': changed,
+                           'difference_bbox': list(box) if box else None})
+    identical = [p['page'] for p in checks if p['identical']]
+    differing = [p['page'] for p in checks if not p['identical']]
+    differing += list(range(min(len(old), len(new)) + 1, max(before['pages'], after['pages']) + 1))
+    return {'page_count_equal': count_equal, 'complete': complete,
+            'pixels_equal': complete and count_equal and len(identical) == before['pages'],
+            'identical_pages': identical, 'differing_pages': differing, 'pages': checks}
