@@ -8,6 +8,16 @@ v0.6 在本地处理已有 DOCX 或旧式 DOC，通过全局控件、搜索与�
 - [实施状态和验收记录](docs/verification/v06.md)
 - [v0.5 历史运行说明](docs/archive/v05-runtime.md)
 
+## Windows 桌面版（LTS 开发分支）
+
+`lts/windows-desktop` 从 master 的 `ba59a02` 建立，首版为原生 Windows 窗口，复用现有核心引擎。
+打开、格式调整、逐页对照、版本撤销与原格式另存都在本机完成。免安装包完整解压后双击 `Wenxu.exe`，不需要 Python / WSL / 浏览器；需要兼容的本机 WPS。
+
+- [桌面版使用与构建](docs/desktop-quickstart.md)
+- [首版 spec 与 LTS 维护约定](docs/specs/windows-desktop-lts.md)
+
+当前为 `1.0.0-preview.1` 验证版；正式 LTS 发布仍需完成干净 Windows 机器、兼容矩阵与分发验收。
+
 ## WSL 启动
 
 ```bash

@@ -9,3 +9,6 @@ verification/
 local-data/
 private-fixtures/
 *.local.json
+.venv-desktop/
+build/
+dist/

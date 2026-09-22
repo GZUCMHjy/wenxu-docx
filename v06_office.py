@@ -41,7 +41,8 @@ class LocalOffice:
     def call(self, action, *args):
         try:
             result = subprocess.run([self.executable, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-                                     '-File', self.script, '-Action', action, *args], capture_output=True, timeout=180)
+                                     '-File', self.script, '-Action', action, *args], capture_output=True, timeout=180,
+                                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise FormatError('本机 WPS 转换超时或启动失败；原稿保留。') from exc
         if result.returncode:
@@ -108,7 +109,8 @@ def native_office():
         script = _path(Path(__file__).with_name('office_bridge.ps1').resolve())
         try:
             result = subprocess.run([executable, '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-                                     '-File', script, '-Action', 'discover'], capture_output=True, timeout=20)
+                                     '-File', script, '-Action', 'discover'], capture_output=True, timeout=20,
+                                    creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0)
             info = json.loads(result.stdout.decode('utf-8-sig')) if result.returncode == 0 else {}
         except (OSError, subprocess.SubprocessError, ValueError):
             info = {}
