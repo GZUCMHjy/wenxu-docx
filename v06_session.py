@@ -138,6 +138,7 @@ class Version:
     roles_json: str = "{}"
     analysis_data: bytes | None = None
     native_map_json: str = '[]'
+    template_json: str = '{}'
 
     @property
     def model_data(self):
@@ -215,12 +216,20 @@ class EditingSession:
             self.renders[key] = self.renderer(v.data, v.extension)
         return self.renders[key]
 
-    def execute(self, model, plan, *, environment=None):
+    def execute(self, model, plan, *, environment=None, template_binding=None):
         source = self.versions[self.current]
         if model.revision != self.current or model.data != source.model_data:
             raise FormatError("当前输入已切换，旧计划已失效。")
         if self.conversion.get("blocking_issues"):
             raise FormatError("；".join(self.conversion["blocking_issues"]))
+        binding = json.loads(source.template_json) if template_binding is None else template_binding
+        if not isinstance(binding, dict) or (binding and (
+                binding.get('basis_kind') not in {'sample_styles', 'comment_calibrated'}
+                or not isinstance(binding.get('name'), str) or not binding['name'].strip()
+                or any(not isinstance(binding.get(k), str) or len(binding[k]) != 64
+                       or set(binding[k]) - set('0123456789abcdef') for k in ('fingerprint', 'file_hash')))):
+            raise FormatError('模板来源记录无效，请重新导入模板。')
+        binding_json = encode(binding)
         env = environment or render_environment()
         frozen = plan.read()
         installed = {f.casefold() for f in env.get("font_families", [])}
@@ -228,7 +237,7 @@ class EditingSession:
         missing = sorted(f for f in requested if f.casefold() not in installed)
         if missing:
             raise FormatError("缺少要求字体：" + "、".join(missing) + "。未创建输出版本。")
-        key = digest((plan.plan_hash + ENGINE_VERSION + NATIVE_VERSION + digest(source.data) + encode(env)).encode())
+        key = digest((plan.plan_hash + ENGINE_VERSION + NATIVE_VERSION + digest(source.data) + encode(env) + binding_json).encode())
         if key in self.jobs:
             return self.versions[self.jobs[key]], False
         output, operations = patch_document(model, plan)
@@ -255,8 +264,9 @@ class EditingSession:
         stem, _ = safe_stem(self.original_name)
         report = {"version": v_id, "parent": self.current, "input_hash": digest(source.data), "index_hash": model.source_hash, "output_hash": digest(output), "source_format": source.extension, "output_format": source.extension, "plan_hash": plan.plan_hash, "engine_version": NATIVE_VERSION if source.extension == 'doc' else ENGINE_VERSION, "created_at": datetime.now(timezone.utc).isoformat(), "plan": frozen, "operations": operations, "checks": checks, "environment": env, "font_warnings": source_font_warnings(model, env), "pages_before": before["pages"], "pages_after": after["pages"], "conversion": self.conversion.copy()}
         report['page_check'] = page_check
+        report['template'] = json.loads(binding_json)
         protections = [{**p, "revision": v_id} for p in frozen["protections"]]
-        version = Version(v_id, f"{stem}_{v_id}.{source.extension}", output, self.current, plan.plan_hash, encode(report), encode(protections), encode(model.role_overrides), analysis_data, encode(mapping))
+        version = Version(v_id, f"{stem}_{v_id}.{source.extension}", output, self.current, plan.plan_hash, encode(report), encode(protections), encode(model.role_overrides), analysis_data, encode(mapping), binding_json)
         self.versions[v_id] = version
         self.jobs[key] = v_id
         self.renders[old_key], self.renders[new_key] = before, after

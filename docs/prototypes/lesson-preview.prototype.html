@@ -1,0 +1,274 @@
+<style>
+#lesson-preview-prototype { --wx-bg: light-dark(#f2f3f5,#181a1e); --wx-bar: light-dark(#fff,#24262b); --wx-text: light-dark(#242933,#eeeef1); --wx-muted: light-dark(#707782,#b0b5bf); --wx-line: light-dark(#e1e4e9,#3a3d44); --wx-blue: #2563eb; --wx-blue-text: light-dark(#205bc9,#a5c1ff); --wx-soft: light-dark(#eef4ff,#293955); font: 14px/1.5 'Microsoft YaHei UI','PingFang SC',sans-serif; color: var(--wx-text); background: var(--wx-bg); border: 1px solid var(--wx-line); border-radius: 10px; overflow: clip; color-scheme: light dark; position: relative; }
+#lesson-preview-prototype * { box-sizing: border-box; }
+#lesson-preview-prototype button, #lesson-preview-prototype select { font: inherit; }
+#lesson-preview-prototype button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--wx-line); border-radius: 5px; background: var(--wx-bar); color: var(--wx-text); padding: 7px 12px; cursor: pointer; white-space: nowrap; min-height: 34px; }
+#lesson-preview-prototype button:hover:not(:disabled) { background: var(--wx-soft); border-color: var(--wx-blue); }
+#lesson-preview-prototype button:disabled { opacity: .46; cursor: default; }
+#lesson-preview-prototype button.wx-primary { background: var(--wx-blue); border-color: var(--wx-blue); color: #fff; }
+#lesson-preview-prototype button.wx-primary:hover:not(:disabled) { background: #1d4ed8; }
+#lesson-preview-prototype button.wx-quiet { background: transparent; border-color: transparent; color: var(--wx-muted); }
+#lesson-preview-prototype button[aria-pressed=true] { background: var(--wx-soft); color: var(--wx-blue-text); border-color: var(--wx-blue); }
+#lesson-preview-prototype .wx-titlebar { display: flex; align-items: center; gap: 10px; padding: 10px 18px; background: var(--wx-bar); border-bottom: 1px solid var(--wx-line); }
+#lesson-preview-prototype .wx-brand { width: 25px; height: 25px; display: grid; place-items: center; border-radius: 5px; background: var(--wx-blue); color: white; font-size: 15px; }
+#lesson-preview-prototype .wx-file { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+#lesson-preview-prototype .wx-demo { color: var(--wx-muted); font-size: 12px; white-space: nowrap; }
+#lesson-preview-prototype .wx-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 18px; background: var(--wx-bar); }
+#lesson-preview-prototype .wx-standard { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1; padding: 0 10px; }
+#lesson-preview-prototype .wx-standard-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--wx-muted); font-size: 13px; }
+#lesson-preview-prototype .wx-standard button { padding: 6px 2px; color: var(--wx-blue-text); }
+#lesson-preview-prototype .wx-document-zone { padding: 20px 24px 30px; min-width: 0; }
+#lesson-preview-prototype .wx-viewbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; max-width: 690px; margin: 0 auto 12px; color: var(--wx-muted); font-size: 12px; }
+#lesson-preview-prototype .wx-view-label { color: var(--wx-text); font-weight: 500; }
+#lesson-preview-prototype .wx-page-index { white-space: nowrap; }
+#lesson-preview-prototype .wx-sheet { max-width: 690px; margin: auto; padding: 44px 38px 30px; background: #fff; color: #161616; border: 1px solid #dedede; box-shadow: 0 3px 14px #0000000d; font-family: 'SimSun','Songti SC','Noto Serif CJK SC',serif; }
+#lesson-preview-prototype .wx-sheet h2 { margin: 0 0 10px; font-size: 22px; font-weight: 600; text-align: center; line-height: 1.4; }
+#lesson-preview-prototype .wx-doc-meta { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 22px; font-size: 12px; line-height: 1.7; }
+#lesson-preview-prototype .wx-lesson-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+#lesson-preview-prototype .wx-lesson-table th, #lesson-preview-prototype .wx-lesson-table td { border: 1px solid #4c4c4c; padding: 11px 9px; line-height: 1.85; vertical-align: top; word-break: break-word; }
+#lesson-preview-prototype .wx-lesson-table th { font-weight: 400; text-align: center; vertical-align: middle; padding: 10px 6px; }
+#lesson-preview-prototype .wx-lesson-table td p { margin: 0 0 8px; line-height: inherit; font-size: inherit; }
+#lesson-preview-prototype .wx-lesson-table td p:last-child { margin: 0; }
+#lesson-preview-prototype .wx-doc-footer { margin-top: 20px; text-align: center; color: #686868; font-size: 11px; }
+#lesson-preview-prototype .wx-statusbar { padding: 8px 18px; min-height: 35px; border-top: 1px solid var(--wx-line); background: var(--wx-bar); color: var(--wx-muted); font-size: 12px; }
+#lesson-preview-prototype .wx-empty { padding: 100px 24px; text-align: center; }
+#lesson-preview-prototype .wx-empty p { color: var(--wx-muted); margin-bottom: 22px; }
+#lesson-preview-prototype dialog { position: absolute; inset: 68px 16px auto auto; margin: 0; width: min(380px,calc(100% - 32px)); max-width: none; max-height: none; padding: 0; border: 1px solid var(--wx-line); border-radius: 8px; box-shadow: 0 10px 32px #00000026; background: var(--wx-bar); color: var(--wx-text); }
+#lesson-preview-prototype dialog::backdrop { background: #14181f38; }
+#lesson-preview-prototype .wx-dialog-heading { display: flex; align-items: center; justify-content: space-between; padding: 17px 18px 12px; border-bottom: 1px solid var(--wx-line); }
+#lesson-preview-prototype .wx-dialog-heading h3 { margin: 0; font-size: 16px; font-weight: 500; }
+#lesson-preview-prototype .wx-rules { padding: 0 18px; }
+#lesson-preview-prototype .wx-rule { padding: 15px 0; border-bottom: 1px solid var(--wx-line); }
+#lesson-preview-prototype .wx-rule:last-child { border-bottom: none; }
+#lesson-preview-prototype .wx-rule-name { margin-bottom: 9px; font-size: 13px; font-weight: 500; }
+#lesson-preview-prototype .wx-rule-controls { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 10px; }
+#lesson-preview-prototype select { min-width: 0; width: 100%; padding: 7px 8px; border-radius: 4px; border: 1px solid var(--wx-line); background: var(--wx-bg); color: var(--wx-text); }
+#lesson-preview-prototype .wx-rule-note { font-size: 12px; margin: 8px 0 0; color: var(--wx-muted); }
+#lesson-preview-prototype .wx-dialog-footer { border-top: 1px solid var(--wx-line); padding: 14px 18px; display: flex; justify-content: flex-end; gap: 8px; }
+#lesson-preview-prototype [hidden] { display: none !important; }
+@media (max-width: 700px) {
+  #lesson-preview-prototype .wx-toolbar { gap: 7px; padding: 10px 12px; }
+  #lesson-preview-prototype .wx-standard { order: 5; flex-basis: 100%; padding: 0; }
+  #lesson-preview-prototype .wx-document-zone { padding: 14px 12px 18px; }
+  #lesson-preview-prototype .wx-sheet { padding: 26px 16px 20px; }
+  #lesson-preview-prototype .wx-lesson-table th, #lesson-preview-prototype .wx-lesson-table td { padding: 8px 5px; }
+  #lesson-preview-prototype .wx-doc-meta { flex-wrap: wrap; }
+}
+@media (max-width: 420px) {
+  #lesson-preview-prototype .wx-titlebar { padding: 9px 10px; gap: 7px; }
+  #lesson-preview-prototype .wx-sheet { padding: 22px 10px 18px; }
+  #lesson-preview-prototype .wx-toolbar button { padding: 7px 8px; font-size: 12px; }
+  #lesson-preview-prototype .wx-doc-meta { font-size: 11px; }
+  #lesson-preview-prototype .wx-lesson-table th, #lesson-preview-prototype .wx-lesson-table td { padding: 7px 3px; }
+  #lesson-preview-prototype .wx-sheet h2 { font-size: 19px; }
+}
+</style>
+
+<section id="lesson-preview-prototype" aria-label="文序预览优先界面设计稿">
+  <div class="wx-titlebar">
+    <span class="wx-brand" aria-hidden="true">文</span>
+    <span class="wx-file" data-file>示例教案.docx</span>
+    <span class="wx-demo">文序 · 交互设计稿</span>
+  </div>
+  <div class="wx-toolbar" role="toolbar" aria-label="教案操作">
+    <button type="button" data-open>打开教案</button>
+    <div class="wx-standard">
+      <span class="wx-standard-name">当前标准：教案金标准</span>
+      <button type="button" class="wx-quiet" data-edit-standard aria-haspopup="dialog">调整金标准</button>
+    </div>
+    <button type="button" class="wx-primary" data-apply>按金标准整理</button>
+    <button type="button" data-compare aria-pressed="false">对比原稿</button>
+    <button type="button" class="wx-primary" data-save>保存副本</button>
+  </div>
+  <main class="wx-document-zone" data-document>
+    <div class="wx-viewbar">
+      <span class="wx-view-label" data-view-label>修改后 · v1</span>
+      <span class="wx-page-index">第 1 页 / 共 1 页 · 适合宽度</span>
+    </div>
+    <article class="wx-sheet" aria-label="示例教案页面">
+      <h2>生活中的比与比例</h2>
+      <div class="wx-doc-meta"><span>课程：数学</span><span>课型：新授课</span><span>课时：2 课时</span></div>
+      <table class="wx-lesson-table" aria-label="教学过程">
+        <colgroup><col style="width:13%"><col style="width:45%"><col style="width:22%"><col style="width:20%"></colgroup>
+        <thead><tr>
+          <th scope="col" data-region="headers">教学环节</th>
+          <th scope="col" data-region="headers">教学内容</th>
+          <th scope="col" data-region="headers">师生活动</th>
+          <th scope="col" data-region="headers">设计意图</th>
+        </tr></thead>
+        <tbody>
+          <tr>
+            <th scope="row" data-region="headers">情境导入<br>（5分钟）</th>
+            <td data-region="content"><p>观察两张不同比例的地图，比较图上距离与实际距离。</p><p>思考：地图缩小了，两个地点之间的距离关系是否改变？</p></td>
+            <td data-region="activities"><p>教师展示地图并提出问题。</p><p>学生观察、交流自己的发现。</p></td>
+            <td data-region="activities">从生活经验出发，建立对“比”的直观认识。</td>
+          </tr>
+          <tr>
+            <th scope="row" data-region="headers">探究学习<br>（25分钟）</th>
+            <td data-region="content"><p>理解比与比例的含义，学习用相同单位表示两个量之间的关系。</p><p>以调配饮料为例，讨论原料用量成倍变化时，配比如何保持不变。</p></td>
+            <td data-region="activities"><p>教师引导比较不同方案。</p><p>学生分组计算，用语言说明计算依据。</p></td>
+            <td data-region="activities">通过比较和表达，将直观经验转化为数学理解。</td>
+          </tr>
+          <tr>
+            <th scope="row" data-region="headers">巩固练习<br>（10分钟）</th>
+            <td data-region="content">根据给定比例调整材料用量，检查计算结果，并说明单位换算的方法。</td>
+            <td data-region="activities">学生独立完成，交换答案并解释思路。</td>
+            <td data-region="activities">检验理解，及时发现并纠正计算中的问题。</td>
+          </tr>
+          <tr>
+            <th scope="row" data-region="headers">课堂小结</th>
+            <td colspan="3" data-region="closing">本节课认识了比与比例，能够结合生活情境描述两个量之间的关系，并用所学方法解决简单问题。</td>
+          </tr>
+          <tr>
+            <th scope="row" data-region="headers">作业布置</th>
+            <td colspan="3" data-region="closing">完成课后练习，寻找一个生活中的比例实例，记录数据并说明它们的关系。</td>
+          </tr>
+          <tr>
+            <th scope="row" data-region="headers">板书设计</th>
+            <td colspan="3" data-region="closing">比与比例　　统一单位 → 表示关系 → 按比例计算 → 检查结果</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="wx-doc-footer">1</div>
+    </article>
+  </main>
+  <div class="wx-empty" data-empty hidden>
+    <strong>从一份教案开始</strong>
+    <p>沿用当前金标准，整理后直接看效果。</p>
+    <button type="button" class="wx-primary" data-load-example>打开示例教案</button>
+  </div>
+  <div class="wx-statusbar" role="status" aria-live="polite" data-status>已按当前标准整理 · 内容保持不变</div>
+
+  <dialog aria-labelledby="wx-standard-title">
+    <div class="wx-dialog-heading">
+      <h3 id="wx-standard-title">调整金标准</h3>
+      <button type="button" class="wx-quiet" data-close-standard aria-label="关闭标准设置">关闭</button>
+    </div>
+    <div data-standard-form>
+      <div class="wx-rules">
+        <div class="wx-rule">
+          <div class="wx-rule-name">表格列头与行头</div>
+          <div class="wx-rule-controls">
+            <select data-font="headers" aria-label="表格列头与行头字体"><option>宋体</option><option>黑体</option><option>仿宋</option><option>楷体</option></select>
+            <select data-size="headers" aria-label="表格列头与行头字号"><option value="9">小五 · 9磅</option><option value="10.5">五号 · 10.5磅</option><option value="12">小四 · 12磅</option><option value="14">四号 · 14磅</option></select>
+          </div>
+        </div>
+        <div class="wx-rule">
+          <div class="wx-rule-name">教学内容</div>
+          <div class="wx-rule-controls">
+            <select data-font="content" aria-label="教学内容字体"><option>宋体</option><option>黑体</option><option>仿宋</option><option>楷体</option></select>
+            <select data-size="content" aria-label="教学内容字号"><option value="9">小五 · 9磅</option><option value="10.5">五号 · 10.5磅</option><option value="12" selected>小四 · 12磅</option><option value="14">四号 · 14磅</option></select>
+          </div>
+        </div>
+        <div class="wx-rule">
+          <div class="wx-rule-name">师生活动与设计意图</div>
+          <div class="wx-rule-controls">
+            <select data-font="activities" aria-label="师生活动与设计意图字体"><option>宋体</option><option>黑体</option><option>仿宋</option><option>楷体</option></select>
+            <select data-size="activities" aria-label="师生活动与设计意图字号"><option value="9">小五 · 9磅</option><option value="10.5">五号 · 10.5磅</option><option value="12">小四 · 12磅</option><option value="14">四号 · 14磅</option></select>
+          </div>
+        </div>
+        <div class="wx-rule">
+          <div class="wx-rule-name">课堂小结、作业布置与板书设计</div>
+          <div class="wx-rule-controls">
+            <select data-font="closing" aria-label="课堂小结作业布置板书设计内容字体"><option>宋体</option><option>黑体</option><option>仿宋</option><option>楷体</option></select>
+            <select data-size="closing" aria-label="课堂小结作业布置板书设计内容字号"><option value="9">小五 · 9磅</option><option value="10.5" selected>五号 · 10.5磅</option><option value="12">小四 · 12磅</option><option value="14">四号 · 14磅</option></select>
+          </div>
+          <p class="wx-rule-note">仅作用于这几行的填写内容，行头仍使用表格标题样式。</p>
+        </div>
+      </div>
+      <div class="wx-dialog-footer">
+        <button type="button" data-cancel-standard>取消</button>
+        <button type="button" class="wx-primary" data-standard-apply>应用并预览</button>
+      </div>
+    </div>
+  </dialog>
+</section>
+
+<script>
+(() => {
+  const root = document.getElementById('lesson-preview-prototype');
+  const find = selector => root.querySelector(selector);
+  const initialRules = { headers:{font:'宋体',size:9}, content:{font:'宋体',size:12}, activities:{font:'宋体',size:9}, closing:{font:'宋体',size:10.5} };
+  const originalRules = { headers:{font:'宋体',size:12}, content:{font:'宋体',size:10.5}, activities:{font:'宋体',size:12}, closing:{font:'宋体',size:12} };
+  const faces = {宋体:'SimSun,"Songti SC",serif',黑体:'SimHei,"Microsoft YaHei",sans-serif',仿宋:'FangSong,"STFangsong",serif',楷体:'KaiTi,"STKaiti",serif'};
+  const clone = value => JSON.parse(JSON.stringify(value));
+  let state = { rules:clone(initialRules), opened:true, applied:true, original:false, version:1, saved:false };
+  const appearance = {theme:'system', paperWidth:690};
+  function adoptSaved(saved) {
+    const value = saved?.modelContent;
+    if (!value?.rules || Object.keys(initialRules).some(k => !faces[value.rules[k]?.font] || ![9,10.5,12,14].includes(value.rules[k]?.size))) return;
+    state.rules = clone(value.rules);
+    const ui = saved.privateContent || {};
+    for (const key of ['opened','applied','original','saved']) if (typeof ui[key] === 'boolean') state[key] = ui[key];
+    if (Number.isInteger(ui.version) && ui.version >= 1 && ui.version < 1000) state.version = ui.version;
+  }
+  function remember() {
+    if (window.openai?.setWidgetState) window.openai.setWidgetState({modelContent:{rules:state.rules},privateContent:{opened:state.opened,applied:state.applied,original:state.original,version:state.version,saved:state.saved}}).catch(()=>{});
+  }
+  function render(message) {
+    root.style.colorScheme = appearance.theme === 'system' ? 'light dark' : appearance.theme;
+    find('.wx-sheet').style.maxWidth = appearance.paperWidth + 'px';
+    find('.wx-viewbar').style.maxWidth = appearance.paperWidth + 'px';
+    find('[data-document]').hidden = !state.opened;
+    find('[data-empty]').hidden = state.opened;
+    const before = state.original || !state.applied;
+    const rules = before ? originalRules : state.rules;
+    root.querySelectorAll('[data-region]').forEach(cell => {
+      const rule = rules[cell.dataset.region];
+      cell.style.fontFamily = faces[rule.font];
+      cell.style.fontSize = (rule.size * 4 / 3) + 'px';
+    });
+    find('[data-view-label]').textContent = before ? '原稿 · 仅用于对比' : '修改后 · v' + state.version;
+    find('[data-compare]').textContent = state.original ? '返回修改后' : '对比原稿';
+    find('[data-compare]').setAttribute('aria-pressed',String(state.original));
+    find('[data-compare]').disabled = !state.opened || !state.applied;
+    find('[data-compare]').hidden = !state.opened;
+    find('[data-open]').disabled = !state.opened;
+    find('[data-apply]').disabled = !state.opened;
+    find('[data-apply]').hidden = !state.opened || state.applied;
+    find('[data-save]').hidden = !state.opened || !state.applied;
+    find('[data-save]').disabled = !state.opened || !state.applied || state.saved;
+    find('[data-save]').textContent = state.saved ? '已保存' : state.original ? '保存修改后' : '保存副本';
+    find('[data-save]').classList.toggle('wx-primary', !state.saved);
+    find('[data-file]').textContent = state.opened ? '示例教案.docx' : '文序';
+    find('[data-status]').textContent = message || (!state.opened ? '已沿用当前金标准' : state.original ? '正在查看原稿' : state.applied ? '已按当前标准整理 · 内容保持不变' : '教案已打开，可以按当前标准整理');
+  }
+  const dialog = find('dialog');
+  find('[data-edit-standard]').addEventListener('click', () => {
+    for (const [key,rule] of Object.entries(state.rules)) {
+      find('[data-font="'+key+'"]').value = rule.font;
+      find('[data-size="'+key+'"]').value = String(rule.size);
+    }
+    dialog.showModal();
+  });
+  function closeSettings() { dialog.close(); find('[data-edit-standard]').focus(); }
+  find('[data-close-standard]').addEventListener('click',closeSettings);
+  find('[data-cancel-standard]').addEventListener('click',closeSettings);
+  find('[data-standard-apply]').addEventListener('click',() => {
+    const rules = {};
+    for (const key of Object.keys(initialRules)) rules[key] = {font:find('[data-font="'+key+'"]').value,size:Number(find('[data-size="'+key+'"]').value)};
+    const changed = JSON.stringify(rules) !== JSON.stringify(state.rules);
+    state.rules = rules;
+    if (changed && state.opened) state.version++;
+    state.applied = state.opened; state.original = false; state.saved = false;
+    closeSettings(); render(changed ? '金标准已更新 · 文字与表格结构保持不变' : '当前标准未变化'); remember();
+  });
+  find('[data-apply]').addEventListener('click',() => {
+    const already = state.applied;
+    state.applied = true; state.original = false; state.saved = false;
+    render(already ? '当前教案已符合金标准，无需重复修改' : '已按当前标准整理 · 内容保持不变'); remember();
+  });
+  find('[data-compare]').addEventListener('click',() => {state.original=!state.original;render();remember();});
+  find('[data-save]').addEventListener('click',() => {state.saved=true;render('设计稿演示：副本保存完成，仍可继续调整');remember();});
+  find('[data-open]').addEventListener('click',() => {state.opened=false;state.original=false;render();remember();});
+  find('[data-load-example]').addEventListener('click',() => {state.opened=true;state.applied=false;state.original=false;state.saved=false;state.version=1;render();remember();});
+  adoptSaved(window.openai?.widgetState);
+  render();
+  window.addEventListener('openai:set_globals',event => {adoptSaved(event.detail?.globals?.widgetState);render();});
+  if (globalThis.Tweak) {
+    const tweak = new Tweak({container:root,onChange:()=>render()});
+    tweak.addSelect(appearance,'theme',{label:'界面外观',options:[{label:'跟随系统',value:'system'},{label:'浅色',value:'light'},{label:'深色',value:'dark'}]});
+    tweak.addSlider(appearance,'paperWidth',{label:'预览纸张宽度',min:600,max:760,step:20,unit:'px'});
+  }
+})();
+</script>

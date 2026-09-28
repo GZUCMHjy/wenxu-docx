@@ -41,6 +41,19 @@ def fixture():
     return output.getvalue()
 
 
+def template_fixture():
+    document = Document()
+    normal = document.styles['Normal']
+    normal.font.name = '宋体'; normal.font.size = Pt(12); normal.font.bold = False
+    fonts = normal.element.get_or_add_rPr().get_or_add_rFonts(); fonts.clear()
+    for key in ('eastAsia', 'ascii', 'hAnsi', 'cs'):
+        fonts.set(qn('w:' + key), '宋体')
+    size = OxmlElement('w:szCs'); size.set(qn('w:val'), '24'); normal.element.get_or_add_rPr().append(size)
+    document.add_paragraph('这是一份合成模板，普通正文使用宋体小四。')
+    output = BytesIO(); document.save(output)
+    return output.getvalue()
+
+
 def start(window, directory):
     root = Path(directory).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -112,7 +125,40 @@ def start(window, directory):
                               pages_before=check["pages_before"], pages_after=check["pages_after"])
                 phase = 3
             elif phase == 3:
-                window.grab().save(str(run_dir / "window.png"))
+                template = run_dir / 'template.docx'; template.write_bytes(template_fixture())
+                report['passed'] = False
+                phase = 4
+                window.load_template_path(template)
+            elif phase == 4:
+                assert window.template_baseline is not None
+                assert window.template_baseline.basis_kind == 'sample_styles'
+                report['template'] = window.template_baseline.binding
+                # Synthetic fixture has table labels; explicitly classify them.
+                pending = [p['pid'] for p in window.model.paragraphs if p['role'] == 'unknown']
+                if pending:
+                    window.correct_roles(pending, 'label')
+                phase = 5
+                window.apply_template_button.click()
+            elif phase == 5:
+                version = window.state.session.versions[window.state.session.current]
+                assert json.loads(version.template_json)['fingerprint'] == report['template']['fingerprint']
+                assert current_values(window.model, window.model.scope('role', role='body'), 'font_east_asia') == ['宋体']
+                window.reviewed.setChecked(True)
+                window.state.save(run_dir / 'template-result.docx')
+                bundle = run_dir / 'gold.wenxu-template'
+                bundle.write_bytes(window.template_baseline.export_bundle())
+                phase = 6
+                window.load_template_path(bundle)
+            elif phase == 6:
+                assert window.template_baseline.fingerprint == report['template']['fingerprint']
+                assert source.read_bytes() == data
+                window.roles_toggle.setChecked(True)
+                window.role_panel.tree.expandAll()
+                report.update(passed=True, template_applied=True, bundle_reimported=True,
+                              template_version=window.state.session.current)
+                phase = 7
+            elif phase == 7:
+                window.grab().save(str(run_dir / 'window.png'))
                 finish()
         except Exception as exc:
             finish(exc)

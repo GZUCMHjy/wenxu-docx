@@ -16,7 +16,7 @@ v0.6 在本地处理已有 DOCX 或旧式 DOC，通过全局控件、搜索与�
 - [桌面版使用与构建](docs/desktop-quickstart.md)
 - [首版 spec 与 LTS 维护约定](docs/specs/windows-desktop-lts.md)
 
-当前为 `1.0.0-preview.1` 验证版；正式 LTS 发布仍需完成干净 Windows 机器、兼容矩阵与分发验收。
+当前为 `1.0.0-preview.2` 验证版。桌面增加模板导入与核对：无旁批自动提取明确样式，有旁批按有限语法提取要求并实际修正；待理解、作用范围或混合格式仍需核对。正文/标题分类可展开查看并纠正，模板来源与保护范围随教案版本记录。详细操作见[桌面版使用说明](docs/desktop-quickstart.md)。正式LTS发布仍需完成干净Windows机器、兼容矩阵与分发验收。
 
 ## WSL 启动
 

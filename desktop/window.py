@@ -9,17 +9,18 @@ from PySide6.QtGui import QAction, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
     QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QProgressBar,
+    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QProgressBar, QInputDialog,
     QPushButton, QScrollArea, QSpinBox, QSplitter, QTabWidget, QToolBar,
     QVBoxLayout, QWidget,
 )
 
 from desktop import VERSION
-from desktop.controller import DocumentState, require_office, scope_choices
+from desktop.controller import DocumentState, require_office, scope_choices, save_bytes, paragraph_page
+from desktop.classification import ClassificationPanel
 from docx_formatting import FormatError
 from v06_patch import current_values
 from v06_plan import build_plan, intent, resolve_scope
-from v06_session import source_font_warnings
+from v06_session import EditingSession, source_font_warnings
 
 
 class Job(QThread):
@@ -39,6 +40,7 @@ class PageView(QWidget):
         super().__init__()
         layout = QVBoxLayout(self)
         self.title = QLabel(title)
+        self.title.setTextFormat(Qt.TextFormat.PlainText)
         self.title.setObjectName("pageTitle")
         layout.addWidget(self.title)
         self.scroll = QScrollArea()
@@ -201,10 +203,13 @@ class FormatPanel(QWidget):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, *, loader=DocumentState.open, office_check=require_office):
+    def __init__(self, *, loader=DocumentState.open, office_check=require_office, template_session_loader=EditingSession.load):
         super().__init__()
         self.loader, self.office_check = loader, office_check
+        self.template_session_loader = template_session_loader
         self.state = self.model = self.job = None
+        self.template_workspace = self.template_baseline = None
+        self.template_source = None
         self.after_job = None
         self.previews = {}
         self.setWindowTitle("文序 · Windows 桌面版")
@@ -235,6 +240,28 @@ class MainWindow(QMainWindow):
         self.notice.setWordWrap(True)
         self.notice.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(self.notice)
+        self.template_bar = QWidget()
+        template_row = QHBoxLayout(self.template_bar)
+        template_row.setContentsMargins(0, 0, 0, 0)
+        self.template_status = QLabel('模板：未选择，可直接编辑文档')
+        self.template_status.setTextFormat(Qt.TextFormat.PlainText)
+        self.template_status.setWordWrap(True)
+        template_row.addWidget(self.template_status, 1)
+        self.import_template_button = QPushButton('导入模板')
+        self.review_template_button = QPushButton('核对模板')
+        self.apply_template_button = QPushButton('按模板整理')
+        self.export_template_button = QPushButton('导出模板包')
+        for button, slot in ((self.import_template_button, self.choose_template),
+                             (self.review_template_button, self.review_template),
+                             (self.apply_template_button, self.apply_template),
+                             (self.export_template_button, self.export_template)):
+            button.clicked.connect(slot)
+            template_row.addWidget(button)
+        self.requirements_button = QPushButton('未自动验证事项')
+        self.requirements_button.clicked.connect(self.show_manual_items)
+        template_row.addWidget(self.requirements_button)
+        self.requirements_button.hide()
+        layout.addWidget(self.template_bar)
         split = QSplitter()
         layout.addWidget(split, 1)
         workspace = QWidget()
@@ -289,6 +316,20 @@ class MainWindow(QMainWindow):
         self.targets.itemSelectionChanged.connect(self.scope_summary)
         local.addWidget(self.targets)
         side.addWidget(self.local_scope)
+        self.roles_toggle = QPushButton('查看正文与标题内容 ▸')
+        self.roles_toggle.setCheckable(True)
+        side.addWidget(self.roles_toggle)
+        self.role_panel = ClassificationPanel()
+        self.role_panel.hide()
+        self.roles_toggle.toggled.connect(self.role_panel.setVisible)
+        self.roles_toggle.toggled.connect(lambda on: self.roles_toggle.setText('收起内容分类 ▾' if on else '查看正文与标题内容 ▸'))
+        self.role_panel.roles_changed.connect(self.correct_roles)
+        self.role_panel.locate.connect(self.locate_paragraph)
+        side.addWidget(self.role_panel)
+        self.protections_button = QPushButton('查看保护范围')
+        self.protections_button.clicked.connect(self.manage_protections)
+        side.addWidget(self.protections_button)
+        self.protections_button.hide()
         self.current_format = QLabel()
         self.current_format.setWordWrap(True)
         self.current_format.setTextFormat(Qt.TextFormat.PlainText)
@@ -395,6 +436,11 @@ class MainWindow(QMainWindow):
         self.undo_action.setEnabled(ready and self.state.session.current != "original")
         self.save_action.setEnabled(ready and (self.state.session.current == "original" or self.reviewed.isChecked()))
         self.reviewed.setEnabled(ready and self.state.session.current != "original")
+        self.import_template_button.setEnabled(self.job is None)
+        self.review_template_button.setEnabled(self.job is None and self.template_workspace is not None)
+        self.apply_template_button.setEnabled(ready and self.template_baseline is not None)
+        self.export_template_button.setEnabled(self.job is None and self.template_baseline is not None)
+        self.requirements_button.setEnabled(self.job is None)
 
     def choose_file(self):
         if not self.confirm_discard():
@@ -403,11 +449,187 @@ class MainWindow(QMainWindow):
         if path:
             self.open_path(path)
 
+    def choose_template(self):
+        path, _ = QFileDialog.getOpenFileName(self, '导入教案模板', '', '教案模板 (*.doc *.docx *.wenxu-template)')
+        if path:
+            self.load_template_path(path)
+
+    def load_template_path(self, path):
+        from template_workflow import TemplateBaseline, TemplateWorkspace
+        def load_template():
+            self.office_check()
+            source = Path(path).resolve(strict=True)
+            if source.suffix.lower() == '.wenxu-template':
+                with source.open('rb') as handle:
+                    data = handle.read(60 * 1024 * 1024 + 1)
+                if len(data) > 60 * 1024 * 1024:
+                    raise FormatError('模板包超过大小限制。')
+                baseline = TemplateBaseline.import_bundle(data, loader=self.template_session_loader)
+                return source, None, baseline, None
+            state = self.loader(source)
+            workspace = TemplateWorkspace(state.session)
+            review = workspace.review()
+            baseline = workspace.baseline() if review.ready and review.basis_kind == 'sample_styles' else None
+            return source, workspace, baseline, review
+        self.start_job('正在识别模板分类与旁批…', load_template, self.template_loaded)
+
+    def template_loaded(self, result):
+        self.template_source, self.template_workspace, self.template_baseline, review = result
+        if self.template_baseline:
+            self.template_status.setText('模板样式已提取：' + self.template_baseline.name
+                                         if self.template_baseline.basis_kind == 'sample_styles'
+                                         else '已导入校准模板：' + self.template_baseline.name)
+        else:
+            self.template_status.setText(f'模板：{self.template_source.name} · 请核对模板（{len(review.blockers)} 项待处理）')
+        self.refresh_enabled()
+        self.refresh_manual_items()
+        self.statusBar().showMessage('模板已读取；工作教案保持当前版本')
+
+    def review_template(self):
+        if not self.template_workspace or self.job:
+            return
+        from desktop.template_dialog import TemplateDialog
+        dialog = TemplateDialog(self.template_workspace, self)
+        # Editing a candidate invalidates its previously adopted baseline.
+        if dialog.exec():
+            self.template_baseline = dialog.baseline
+        elif dialog.changed:
+            self.template_baseline = None
+        if self.template_baseline:
+            self.template_status.setText('金标准：' + self.template_baseline.name)
+        else:
+            self.template_status.setText('模板尚有待核对项，请继续“核对模板”')
+        self.refresh_enabled()
+        self.refresh_manual_items()
+
+    def manual_items(self):
+        if self.state:
+            binding = self.state.template_binding() or json.loads(self.state.session.versions[self.state.session.current].template_json)
+            if binding:
+                items = [{**item, 'origin': '当前版本依据：' + binding['name']} for item in binding.get('manual_items', [])]
+                if self.template_baseline and self.template_baseline.fingerprint != binding['fingerprint']:
+                    items += [{**item, 'origin': '所选模板：' + self.template_baseline.name} for item in self.baseline_manual_items()]
+                return items
+        return self.baseline_manual_items()
+
+    def baseline_manual_items(self):
+        if not self.template_baseline:
+            return []
+        manifest = self.template_baseline.manifest
+        comments = {c['key']: c for c in manifest['comments']}
+        return [{**comments.get(key, {}), **decision} for key, decision in manifest['decisions'].items()
+                if decision['classification'] != 'protection']
+
+    def refresh_manual_items(self):
+        count = len(self.manual_items())
+        self.requirements_button.setText(f'未自动验证事项（{count}）')
+        self.requirements_button.setVisible(bool(count))
+
+    def show_manual_items(self):
+        stages = {'template': '模板本身', 'manuscript': '正式教案填写', 'after_class': '授课结束后', 'printing': '打印时'}
+        lines = [f"{i}. {item.get('text', '外部要求')}\n{item.get('origin', '所选模板')}\n适用阶段：{stages.get(item.get('stage'), '待核对')}\n处理说明：{item.get('reason', '')}"
+                 for i, item in enumerate(self.manual_items(), 1)]
+        QMessageBox.information(self, '这些要求尚未自动验证', '\n\n'.join(lines) or '当前版本没有单列的人工检查事项。')
+
+    def apply_template(self):
+        if not self.template_baseline or not self.state or self.job:
+            return
+        try:
+            baseline = self.template_baseline
+            protections = self.state.protected_scopes()
+            review = baseline.application_review(self.model, protections=protections)
+            if review.blockers:
+                from desktop.template_dialog import TemplateApplicationDialog
+                dialog = TemplateApplicationDialog(baseline, self.model, self, protections=protections)
+                if not dialog.exec():
+                    return
+                review = baseline.application_review(self.model, resolutions=dialog.resolutions, protections=protections)
+            if review.blockers:
+                raise FormatError('\n'.join(review.blockers))
+            binding = {**baseline.binding, 'manual_items': self.baseline_manual_items()}
+            if not review.differences:
+                self.state.select_template(binding, review.protections)
+                self.applied(None)
+                self.sync_version()
+                self.notice.setText('当前文档已符合所选模板；后续修改将记录该模板来源，没有新增版本。')
+                return
+            if review.plan is None:
+                raise FormatError('模板没有可应用到当前教案的格式。')
+            session, model = self.state.session, self.model
+            def execute():
+                version, _ = session.execute(model, review.plan, environment=session.environment,
+                                             template_binding=binding)
+                return (version, session.preview(version.id)) if version else None
+            self.start_job('正在按模板整理并核对输出…', execute, self.applied)
+        except Exception as exc:
+            self.error(exc)
+
+    def export_template(self):
+        if not self.template_baseline or self.job:
+            return
+        path, _ = QFileDialog.getSaveFileName(self, '导出金标准模板包', '教案金标准.wenxu-template',
+                                             '文序模板包 (*.wenxu-template)', options=QFileDialog.Option.DontConfirmOverwrite)
+        if not path:
+            return
+        if not Path(path).suffix:
+            path += '.wenxu-template'
+        if Path(path).suffix.lower() != '.wenxu-template':
+            self.error(FormatError('模板包请使用 .wenxu-template 扩展名。')); return
+        overwrite = Path(path).exists()
+        if overwrite and QMessageBox.question(self, '替换模板包', '目标已存在，是否替换？',
+                                              QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                              QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
+            return
+        protected = [p for p in (self.template_source, self.state.source if self.state else None) if p]
+        baseline = self.template_baseline
+        self.start_job('正在保存模板与校准记录…',
+                       lambda: save_bytes(path, baseline.export_bundle(), overwrite=overwrite, protected=protected),
+                       lambda saved: self.statusBar().showMessage('已导出模板包：' + str(saved)))
+
+    def correct_roles(self, pids, role):
+        if not self.state or self.job or not pids:
+            return
+        try:
+            self.state.set_roles(pids, role)
+            self.model = self.state.model()
+            self.sync_version()
+            self.notice.setText('分类已更正，修改范围已重新计算；文档文字和格式尚未改变。')
+        except Exception as exc:
+            self.error(exc)
+
+    def locate_paragraph(self, pid):
+        if not self.state or self.job:
+            return
+        row = self.model.row(pid)
+        page = paragraph_page(self.previews[self.state.session.current], row['text'])
+        if page:
+            self.page_number.setValue(page)
+            self.notice.setText('预览已定位：' + row['location'])
+            return
+        self.notice.setText(row['location'] + '；页面文字未能唯一定位，请结合原文和表格位置核对。')
+
+    def manage_protections(self):
+        if not self.state or self.job: return
+        scopes = self.state.protected_scopes()
+        choices = []
+        for n, scope in enumerate(scopes, 1):
+            spans, _ = resolve_scope(self.model, scope)
+            rows = [self.model.row(pid) for pid in dict.fromkeys(s['pid'] for s in spans)]
+            choices.append(f'保护 {n}：' + '；'.join(r['text'][:35] or r['location'] for r in rows))
+        if not choices: return
+        chosen, ok = QInputDialog.getItem(self, '查看或解除保护范围', '这些内容会被普通修改排除；选择一项可解除保护：', choices, editable=False)
+        if not ok: return
+        if QMessageBox.question(self, '解除这项保护', '解除后，后续修改可以作用于这些内容。是否继续？',
+                                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                                QMessageBox.StandardButton.No) == QMessageBox.StandardButton.Yes:
+            self.state.release_protection(choices.index(chosen)); self.sync_version()
+            self.notice.setText('已明确解除所选保护；文档内容尚未改变。')
+
     def open_path(self, path):
         def load():
             self.office_check()
             state = self.loader(path)
-            return state, state.session.model(), state.session.preview()
+            return state, state.model(), state.session.preview()
         self.start_job("正在打开并核对文档，请稍候…", load, self.loaded)
 
     def loaded(self, value):
@@ -445,7 +667,13 @@ class MainWindow(QMainWindow):
         self.reviewed.setChecked(session.current in self.state.reviewed)
         self.reviewed.blockSignals(False)
         self.scope_changed()
+        self.role_panel.set_model(self.model)
+        self.scope_summary()
+        protections = self.state.protected_scopes()
+        self.protections_button.setText(f'查看保护范围（{len(protections)}）')
+        self.protections_button.setVisible(bool(protections))
         self.show_pages()
+        self.refresh_manual_items()
         self.refresh_enabled()
 
     def scope_changed(self):
@@ -498,10 +726,15 @@ class MainWindow(QMainWindow):
             if is_page:
                 text = "勾选需要调整的页边距；未勾选项保持原样。"
             else:
-                spans, _ = resolve_scope(self.model, scope)
+                spans, warnings = resolve_scope(self.model, scope)
+                protected = {s['pid'] for scope in self.state.protected_scopes() for s in resolve_scope(self.model, scope)[0]}
+                protected.update(p['pid'] for p in self.model.paragraphs if p['protected_spans'])
+                self.role_panel.set_included({s['pid'] for s in spans}, protected)
                 fonts = current_values(self.model, scope, "font_east_asia")
                 summary = "、".join(str(v) if v is not None else "默认字体" for v in fonts[:4]) or "无可编辑文字"
                 text = f"已选 {len({s['pid'] for s in spans})} 个段落 · 当前中文字体：{summary}" + ("等" if len(fonts) > 4 else "")
+                if warnings:
+                    text += '\n' + '\n'.join(warnings)
             self.current_format.setText(text)
         except FormatError as exc:
             self.current_format.setText(str(exc))
@@ -511,14 +744,16 @@ class MainWindow(QMainWindow):
             return
         try:
             panel = self.page_panel if self.tabs.currentIndex() == 1 else self.format_panel
-            review = build_plan(self.model, [intent(self.chosen_scope(), panel.values(), source="桌面控件")])
+            review = build_plan(self.model, [intent(self.chosen_scope(), panel.values(), source="桌面控件")],
+                                self.state.protected_scopes())
             if review.blockers:
                 raise FormatError("\n".join(review.blockers))
             if review.notices and QMessageBox.question(self, "确认修改范围", "\n".join(review.notices) + "\n继续应用？") != QMessageBox.StandardButton.Yes:
                 return
             model, session = self.model, self.state.session
+            binding = self.state.template_binding()
             def execute():
-                version, created = session.execute(model, review.plan, environment=session.environment)
+                version, created = session.execute(model, review.plan, environment=session.environment, template_binding=binding)
                 if version is None:
                     return None
                 # Version selection stays on the UI thread after the job succeeds.
@@ -533,25 +768,27 @@ class MainWindow(QMainWindow):
             return
         version, preview = result
         self.state.session.select(version.id)
-        self.model = self.state.session.model()
+        self.model = self.state.model()
         self.previews[version.id] = preview
         self.sync_version()
         report = json.loads(version.report_json)
         self.notice.setText(f"已应用修改 · {report['pages_before']} → {report['pages_after']} 页。请核对预览后另存副本。")
+        if self.manual_items():
+            self.notice.setText(self.notice.text() + f' 另有 {len(self.manual_items())} 项要求未自动验证，可在上方查看。')
         self.statusBar().showMessage("修改成功 · " + version.name)
 
     def choose_version(self, index):
         if not self.state or self.job:
             return
         self.state.session.select(self.versions.itemData(index))
-        self.model = self.state.session.model()
+        self.model = self.state.model()
         self.sync_version()
         self.notice.setText("已切换版本。后续修改基于当前版本，原稿始终保留。")
 
     def undo(self):
         if self.state and not self.job:
             self.state.session.undo()
-            self.model = self.state.session.model()
+            self.model = self.state.model()
             self.sync_version()
             self.notice.setText("已撤销到上一版本；可在版本列表中返回后续版本。")
 
@@ -570,6 +807,9 @@ class MainWindow(QMainWindow):
         for view, preview in ((self.original_view, original), (self.current_view, current)):
             view.show_page(preview["images"][index] if index < len(preview["images"]) else None, zoom)
         self.current_view.title.setText("当前版本 · " + self.state.session.current + f" · {current['pages']} 页")
+        binding = self.state.template_binding() or json.loads(self.state.session.versions[self.state.session.current].template_json)
+        if binding:
+            self.current_view.title.setText(self.current_view.title.text() + ' · 依据模板：' + binding['name'])
         self.original_view.resize_timer.start(0)
         self.current_view.resize_timer.start(0)
 
@@ -598,7 +838,8 @@ class MainWindow(QMainWindow):
                                                   QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
                 return
             state = self.state
-            self.start_job("正在保存副本…", lambda: state.save(path, overwrite=overwrite),
+            protected = [self.template_source] if self.template_source else []
+            self.start_job("正在保存副本…", lambda: state.save(path, overwrite=overwrite, protected=protected),
                            lambda saved: self.statusBar().showMessage("已保存：" + str(saved)))
 
     def about(self):
