@@ -5,7 +5,7 @@ portable rules refer to roles/column names, never another document's offsets.
 """
 from __future__ import annotations
 
-from copy import deepcopy
+from copy import copy, deepcopy
 from dataclasses import dataclass, field
 from io import BytesIO
 import json
@@ -275,6 +275,8 @@ class TemplateReview:
     ready: bool = False
     plan: object = None
     protections: list[dict] = field(default_factory=list)
+    notices: list[str] = field(default_factory=list)
+    region_mapping: object = None
 
 
 def _evaluate(model, rules, protections, review, read=None):
@@ -284,7 +286,8 @@ def _evaluate(model, rules, protections, review, read=None):
     # exclusion records so the existing engine can independently rebuild them.
     rules = json.loads(encode(rules))
     if not rules:
-        review.blockers.append('没有可转移的明确格式规则。')
+        if not review.blockers:
+            review.blockers.append('没有可转移的明确格式规则。')
         return review
     # The unprotected plan represents every requirement, including local exceptions.
     full = build_plan(model, rules)
@@ -329,6 +332,7 @@ class TemplateWorkspace:
         self.rules = {}
         self.decisions = {}
         self.protections = []
+        self.region_standard = None
         self.original_hash = digest(session.original)
 
     def model(self):
@@ -393,6 +397,50 @@ class TemplateWorkspace:
         self.rules.pop(key, None)
         self.decisions.pop(key, None)
 
+    def clone(self):
+        candidate = copy(self)
+        candidate.session = copy(self.session)
+        for name in ('versions', 'renders', 'jobs', 'environment', 'conversion'):
+            setattr(candidate.session, name, getattr(self.session, name).copy())
+        for name in ('roles', 'rules', 'decisions', 'protections', 'region_standard'):
+            setattr(candidate, name, deepcopy(getattr(self, name)))
+        return candidate
+
+    def set_region_standard(self, settings, heading_policy='preserve'):
+        from lesson_regions import validate_settings
+        settings = validate_settings(settings, heading_policy)
+        if self.region_standard:
+            previous = self.region_standard['previous_rules']
+        else:
+            before = self.review()
+            previous = before.rules if before.ready and before.basis_kind == 'sample_styles' else []
+        previous = deepcopy(previous)
+        for rule in previous: rule['scope'].pop('revision', None)
+        self.region_standard = {'settings': settings, 'heading_policy': heading_policy, 'previous_rules': previous}
+
+    def _region_rules(self, model, rules, review):
+        from lesson_regions import detect_regions, region_rules
+        standard = self.region_standard
+        mapping = detect_regions(model)
+        review.region_mapping = mapping
+        review.blockers.extend(mapping.issues)
+        review.notices.extend(mapping.notices)
+        if standard['heading_policy'] == 'preserve':
+            review.notices.extend(h['location'] + '：' + h['reason'] for h in mapping.preserved_headings)
+        if not mapping.tables and not mapping.issues:
+            review.blockers.append('没有可靠识别到教学过程表或独立特殊行。')
+        result = []
+        for rule in rules:
+            values = validate_values(rule['set'])
+            replaced = {key: value for key, value in values.items() if key in {'font_east_asia', 'font_western', 'font_size'}}
+            unchanged = {key: value for key, value in values.items() if key not in replaced}
+            if unchanged:
+                result.append({**rule, 'set': unchanged})
+            if replaced:
+                result.append({**rule, 'key': rule['key'] + ':outside_regions', 'scope': {**rule['scope'], 'exclude_lesson_regions': True, 'lesson_heading_policy': standard['heading_policy']}, 'set': replaced})
+        result.extend(region_rules(model, standard['settings'], standard['heading_policy'], mapping))
+        return result
+
     def _protections(self, model):
         return [_scope(model, p) for p in self.protections] + [_scope(model, d['scope']) for d in self.decisions.values() if d['classification'] == 'protection']
 
@@ -430,7 +478,7 @@ class TemplateWorkspace:
         review = TemplateReview('comment_calibrated' if comments else 'sample_styles', comments=comments)
         read = _value_reader(model)
         unknown = [p['pid'] for p in model.paragraphs if p['role'] == 'unknown' and p['text'].strip()]
-        if unknown:
+        if unknown and not self.region_standard:
             review.blockers.append('存在待归类内容：' + '、'.join(map(str, unknown)))
         if comments:
             rules = []
@@ -461,13 +509,15 @@ class TemplateWorkspace:
                 if len(roles) > 1 and pid not in self.roles:
                     review.blockers.append(f'段落 {pid} 的旁批角色要求冲突，请明确分类。')
         else:
-            rules = self._sample_rules(model, review, read)
+            rules = deepcopy(self.region_standard['previous_rules']) if self.region_standard else self._sample_rules(model, review, read)
         generated = {r['key'] for r in rules}
         for key, rule in self.rules.items():
             if key not in generated and not key.startswith('comment:'):
                 rules.append(deepcopy(rule))
         for rule in rules:
             rule['scope'] = {**rule['scope'], 'revision': model.revision}
+        if self.region_standard:
+            rules = self._region_rules(model, rules, review)
         review.rules = rules
         protections = self._protections(model)
         return _evaluate(model, rules, protections, review, read)
@@ -501,7 +551,7 @@ class TemplateWorkspace:
         if not review.ready:
             raise FormatError('模板尚未满足全部适用要求：' + '；'.join(review.blockers or ['仍有格式差异']))
         version = self.session.versions[self.session.current]
-        if (review.basis_kind == 'comment_calibrated' or version.parent is not None) and not reviewed:
+        if (review.basis_kind == 'comment_calibrated' or version.parent is not None or self.region_standard) and not reviewed:
             raise FormatError('请先查看实际模板预览并确认版式。')
         def portable_record(value):
             result = deepcopy(value)
@@ -516,6 +566,8 @@ class TemplateWorkspace:
                     'decisions': {k: portable_record(v) for k, v in self.decisions.items()}, 'protections': [portable_record(v) for v in self.protections],
                     'derived_rules': [portable_record(r) for r in review.rules],
                     'comments': [portable_record(c) for c in review.comments], 'reviewed': bool(reviewed)}
+        if self.region_standard:
+            manifest['region_standard'] = deepcopy(self.region_standard)
         manifest['fingerprint'] = digest(encode(manifest).encode())
         return TemplateBaseline(version.data, encode(manifest))
 
@@ -541,6 +593,24 @@ class TemplateBaseline:
     def binding(self): return {key: self.manifest[key] for key in ('name', 'basis_kind', 'fingerprint', 'file_hash')}
     @property
     def rules(self): return self.manifest['derived_rules']
+    @property
+    def region_standard(self): return self.manifest.get('region_standard')
+
+    def workspace(self, *, loader=EditingSession.load):
+        manifest = self.manifest
+        _validate_manifest(manifest, self.data)
+        workspace = TemplateWorkspace(loader(manifest['name'], self.data))
+        workspace.original_hash = manifest['original_hash']
+        workspace.set_roles({int(k): v for k, v in manifest['roles'].items()})
+        for key, rule in manifest['rules'].items():
+            if rule['key'] != key:
+                raise FormatError('模板规则标识不匹配。')
+            workspace.set_rule(key, rule['scope'], rule['set'], exception=rule['exception'])
+        for key, value in manifest['decisions'].items():
+            workspace.classify_comment(key, value['classification'], reason=value['reason'], stage=value['stage'], scope=value.get('scope'))
+        workspace.set_protections(manifest['protections'])
+        workspace.region_standard = deepcopy(manifest.get('region_standard'))
+        return workspace
 
     def application_review(self, model, resolutions=None, protections=None):
         resolutions = resolutions or {}
@@ -548,6 +618,17 @@ class TemplateBaseline:
         review = TemplateReview(self.basis_kind, manual_items=[{'key': key, **value} for key, value in manifest['decisions'].items()])
         target_protections = protections if protections is not None else []
         rules, protections, pending = [], [], []
+        region_mapping = None
+        if self.region_standard:
+            from lesson_regions import detect_regions
+            region_mapping = detect_regions(model)
+            review.region_mapping = region_mapping
+            review.blockers.extend(region_mapping.issues)
+            review.notices.extend(region_mapping.notices)
+            if self.region_standard['heading_policy'] == 'preserve':
+                review.notices.extend(h['location'] + '：' + h['reason'] for h in region_mapping.preserved_headings)
+            if not region_mapping.tables and not region_mapping.issues:
+                review.blockers.append('目标稿没有可靠识别到教学过程区域。')
         if not isinstance(target_protections, list):
             review.blockers.append('当前教案的保护范围记录无效。')
         else:
@@ -560,18 +641,20 @@ class TemplateBaseline:
                 except (FormatError, KeyError, TypeError) as exc:
                     review.blockers.append('当前教案保护范围：' + str(exc))
         for row in model.paragraphs:
-            if row['role'] == 'unknown' and row['text'].strip():
+            if row['role'] == 'unknown' and row['text'].strip() and not self.region_standard:
                 review.blockers.append(f"目标稿段落 {row['pid']} 待归类，模板覆盖范围未确定。")
         for item in manifest['derived_rules']:
             rule = deepcopy(item); scope = rule['scope']; key = rule['key']
+            if self.region_standard and scope.get('kind') == 'lesson_region':
+                continue  # Recreate every available group in the new document.
             if key in resolutions:
-                scope = resolutions[key]
+                scope = {**resolutions[key], **{k: v for k, v in scope.items() if k in {'exclude_lesson_regions', 'lesson_heading_policy'}}}
             elif scope['kind'] == 'role':
                 if not any(p['role'] == scope['role'] and p['text'].strip() for p in model.paragraphs):
                     continue  # Absent roles are not invented.
             elif scope['kind'] == 'named_column':
-                scope = {'kind': 'named_column', 'label': scope.get('label')}
-            elif scope['kind'] not in {'all', 'page'}:
+                scope = {k: v for k, v in scope.items() if k not in {'column_id', 'revision'}}
+            elif scope['kind'] not in {'all', 'page', 'lesson_region'}:
                 review.blockers.append(f'{key} 是模板局部范围，请在目标稿重新选择。')
                 pending.append({**rule, 'pending_scope': True})
                 continue
@@ -581,6 +664,9 @@ class TemplateBaseline:
             except FormatError as exc:
                 review.blockers.append(f'{key}：{exc}')
                 pending.append({**rule, 'pending_scope': True})
+        if self.region_standard:
+            from lesson_regions import region_rules
+            rules.extend(region_rules(model, self.region_standard['settings'], self.region_standard['heading_policy'], region_mapping))
         for number, protection in enumerate(manifest['protections']):
             key = 'protection:' + str(number)
             scope = resolutions.get(key)
@@ -631,16 +717,7 @@ class TemplateBaseline:
                     raise FormatError('模板原格式无效。')
                 original = archive.read('template.' + extension)
             _validate_manifest(manifest, original)
-            workspace = TemplateWorkspace(loader(manifest['name'], original))
-            workspace.original_hash = manifest['original_hash']
-            workspace.set_roles({int(k): v for k, v in manifest['roles'].items()})
-            for key, rule in manifest['rules'].items():
-                if rule['key'] != key:
-                    raise FormatError('模板规则标识不匹配。')
-                workspace.set_rule(key, rule['scope'], rule['set'], exception=rule['exception'])
-            for key, value in manifest['decisions'].items():
-                workspace.classify_comment(key, value['classification'], reason=value['reason'], stage=value['stage'], scope=value.get('scope'))
-            workspace.set_protections(manifest['protections'])
+            workspace = cls(original, encode(manifest)).workspace(loader=loader)
             recomputed = workspace.baseline(reviewed=manifest['reviewed'])
             if recomputed.manifest != manifest:
                 raise FormatError('模板记录与重新提取的实际属性不一致，请重新导入原格式文件。')
@@ -653,7 +730,7 @@ class TemplateBaseline:
 
 def _validate_manifest(manifest, data):
     keys = {'schema', 'name', 'extension', 'file_hash', 'original_hash', 'basis_kind', 'roles', 'rules', 'decisions', 'protections', 'derived_rules', 'comments', 'reviewed', 'fingerprint'}
-    if not isinstance(manifest, dict) or set(manifest) != keys or manifest['schema'] != SCHEMA:
+    if not isinstance(manifest, dict) or set(manifest) - {'region_standard'} != keys or manifest['schema'] != SCHEMA:
         raise FormatError('模板记录版本或字段无效。')
     for key in ('file_hash', 'original_hash', 'fingerprint'):
         if not isinstance(manifest[key], str) or not re.fullmatch('[0-9a-f]{64}', manifest[key]):
@@ -665,3 +742,14 @@ def _validate_manifest(manifest, data):
         raise FormatError('模板依据类型或原格式名称无效。')
     if any(not isinstance(manifest[k], dict) for k in ('roles', 'rules', 'decisions')) or any(not isinstance(manifest[k], list) for k in ('protections', 'derived_rules', 'comments')):
         raise FormatError('模板记录结构无效。')
+    if 'region_standard' in manifest:
+        from lesson_regions import validate_settings
+        standard = manifest['region_standard']
+        if not isinstance(standard, dict) or set(standard) != {'settings', 'heading_policy', 'previous_rules'} or not isinstance(standard['previous_rules'], list):
+            raise FormatError('教案区域标准记录无效。')
+        if validate_settings(standard['settings'], standard['heading_policy']) != standard['settings']:
+            raise FormatError('教案区域标准属性无效。')
+        for rule in standard['previous_rules']:
+            if not isinstance(rule, dict) or not isinstance(rule.get('scope'), dict) or not isinstance(rule.get('key'), str):
+                raise FormatError('区域修订前的来源规则无效。')
+            validate_values(rule.get('set'))

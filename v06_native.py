@@ -192,6 +192,13 @@ def _normalized_xml(name, raw, parts=None):
             '{http://purl.org/dc/terms/}modified'}]
     elif name == 'docProps/custom.xml':
         remove = [c for c in root if c.get('name') == 'ICV' and len(c) == 1 and re.fullmatch(r'[0-9A-F]{32}_\d+', c[0].text or '')]
+        for child in root:
+            # WPS updates its saved-by build stamp after an application upgrade.
+            # Preserve the property, value type, locale and all other metadata.
+            if (child.get('name') == 'KSOProductBuildVer' and len(child) == 1
+                    and child[0].tag == '{http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes}lpwstr'
+                    and re.fullmatch(r'\d{4}-\d+\.\d+\.\d+\.\d+', child[0].text or '')):
+                child[0].text = child[0].text.split('-', 1)[0] + '-WPS-build'
     for node in remove: root.remove(node)
     return E.tostring(root, method='c14n')
 

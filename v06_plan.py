@@ -85,6 +85,15 @@ def resolve_scope(model, scope):
             a, b = span.get("start"), span.get("end")
             if type(a) is not int or type(b) is not int or not 0 <= a < b <= len(p["text"]):
                 raise FormatError("字符选区已失效或为空。")
+        if scope.get('exclude_lesson_regions'):
+            from lesson_regions import detect_regions
+            mapping = detect_regions(model)
+            if mapping.issues:
+                raise FormatError('；'.join(mapping.issues))
+            excluded = {pid for pids in mapping.groups.values() for pid in pids}
+            if scope.get('lesson_heading_policy', 'preserve') == 'same_as_content':
+                excluded.update(h['pid'] for h in mapping.preserved_headings)
+            spans = [s for s in spans if s['pid'] not in excluded]
         return spans, warnings
     if kind == "paragraphs":
         pids = scope.get("pids", [])
@@ -115,9 +124,24 @@ def resolve_scope(model, scope):
         if len(columns) != 1:
             raise FormatError("栏目未定位或同名栏目有多处，请选择具体填写区。")
         pids = columns[0]["pids"]
+    elif kind == "lesson_region":
+        from lesson_regions import detect_regions, region_pids
+        mapping = detect_regions(model)
+        if mapping.issues:
+            raise FormatError('；'.join(mapping.issues))
+        pids = region_pids(mapping, scope.get('region'), scope.get('heading_policy', 'preserve'))
     else:
         raise FormatError("范围未理解或不受支持。")
-    if not pids:
+    if scope.get('exclude_lesson_regions'):
+        from lesson_regions import detect_regions
+        mapping = detect_regions(model)
+        if mapping.issues:
+            raise FormatError('；'.join(mapping.issues))
+        excluded = {pid for pids in mapping.groups.values() for pid in pids}
+        if scope.get('lesson_heading_policy', 'preserve') == 'same_as_content':
+            excluded.update(h['pid'] for h in mapping.preserved_headings)
+        pids = [pid for pid in pids if pid not in excluded]
+    if not pids and not scope.get('exclude_lesson_regions'):
         raise FormatError("当前范围没有命中对象。")
     return [{"pid": pid, "start": 0, "end": len(model.row(pid)["text"])} for pid in sorted(set(pids))], warnings
 

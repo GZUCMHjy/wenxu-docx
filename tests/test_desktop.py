@@ -198,6 +198,7 @@ class WindowTests(unittest.TestCase):
 
     def apply_font(self):
         window = self.window
+        window.editor_dock.show()
         window.scope.setCurrentIndex(next(i for i in range(window.scope.count()) if window.scope.itemText(i) == "全文文字"))
         window.format_panel.font_combo.setCurrentIndex(window.format_panel.font_combo.findData("黑体"))
         QTest.mouseClick(window.apply_button, Qt.MouseButton.LeftButton)
@@ -209,8 +210,10 @@ class WindowTests(unittest.TestCase):
         self.assertEqual(self.errors, [])
         self.assertEqual(window.state.session.current, "v1")
         self.assertEqual(current_values(window.model, window.model.scope("all"), "font_east_asia"), ["黑体"])
-        self.assertFalse(window.save_action.isEnabled())
-        QTest.mouseClick(window.reviewed, Qt.MouseButton.LeftButton, pos=QPoint(10, window.reviewed.height() // 2))
+        self.assertTrue(window.save_action.isEnabled())
+        self.assertEqual(window.primary.text(), '保存副本')
+        self.assertFalse(window.reviewed.isVisible())
+        window.reviewed.setChecked(True)
         self.assertTrue(window.save_action.isEnabled())
         self.assertEqual(window.format_panel.values(), {})
         window.undo()
@@ -243,14 +246,15 @@ class WindowTests(unittest.TestCase):
 
     def test_unchanged_comparison_uses_the_same_visual_scale(self):
         window = self.window
+        QTest.qWait(100)
+        width = window.current_view.page.pixmap().width()
         window.compare.setChecked(True)
         QTest.qWait(100)
-        left, right = window.original_view.page.pixmap(), window.current_view.page.pixmap()
-        self.assertLessEqual(abs(left.width() - right.width()), 1)
-        window.resize(1100, 720)
+        self.assertFalse(window.original_view.isVisible())
+        self.assertEqual(width, window.current_view.page.pixmap().width())
+        window.compare.setChecked(False)
         QTest.qWait(100)
-        left, right = window.original_view.page.pixmap(), window.current_view.page.pixmap()
-        self.assertLessEqual(abs(left.width() - right.width()), 1)
+        self.assertEqual(width, window.current_view.page.pixmap().width())
 
     def test_failed_open_keeps_existing_session(self):
         window = self.window

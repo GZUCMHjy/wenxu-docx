@@ -73,6 +73,14 @@ class NativeTests(unittest.TestCase):
         self.assertEqual(_normalized_xml('docProps/core.xml', a), _normalized_xml('docProps/core.xml', b))
         self.assertNotEqual(_normalized_xml('docProps/core.xml', a), _normalized_xml('docProps/core.xml', b.replace(b'keep', b'lost')))
 
+    def test_wps_save_build_stamp_is_metadata_but_custom_values_are_preserved(self):
+        a = b'<Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/custom-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><property name="KSOProductBuildVer" pid="2"><vt:lpwstr>2052-12.1.0.10000</vt:lpwstr></property><property name="UserRule" pid="3"><vt:lpwstr>keep</vt:lpwstr></property></Properties>'
+        b = a.replace(b'12.1.0.10000', b'12.1.0.20000')
+        normalized = _normalized_xml('docProps/custom.xml', a)
+        self.assertEqual(normalized, _normalized_xml('docProps/custom.xml', b))
+        for damaged in (b.replace(b'keep', b'lost'), b.replace(b'2052-', b'1033-'), b.replace(b'12.1.0.20000', b'arbitrary'), b.replace(b'lpwstr', b'blob')):
+            self.assertNotEqual(normalized, _normalized_xml('docProps/custom.xml', damaged))
+
     def test_character_indents_preserve_units_and_explicit_point_indents(self):
         a = f'<w:document xmlns:w="{NS["w"]}"><w:ind w:firstLine="480" w:firstLineChars="200"/><w:ind w:left="720"/></w:document>'.encode()
         same = a.replace(b'firstLine="480"', b'firstLine="600"')

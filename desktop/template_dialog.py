@@ -15,7 +15,7 @@ from desktop.controller import save_bytes, paragraph_page
 from desktop.window import FormatPanel, Job, PageView
 from docx_formatting import FormatError
 from v06_model import ROLE_LABELS
-from v06_plan import resolve_scope
+from v06_plan import resolve_scope, validate_values
 
 
 class RuleDialog(QDialog):
@@ -208,7 +208,7 @@ class TemplateDialog(QDialog):
                 scope_label = ROLE_LABELS.get(scope.get('role'), '指定范围')
                 positions = '；'.join(model.row(pid)['location'] for pid in pids[:4])
                 read = _value_reader(model)
-                actual = {prop: read(scope, prop) for prop in rule['set']}
+                actual = {prop: read(scope, prop) for prop in validate_values(rule['set'])}
                 self.detail.appendPlainText(f'\n实际作用范围：{scope_label} · {len(pids)} 段 · {positions}'
                                             + '\n当前有效格式：' + self.values_label(actual)
                                             + '\n要求格式：' + self.values_label(rule['set']))

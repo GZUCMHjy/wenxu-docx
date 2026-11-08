@@ -9,7 +9,7 @@ from PySide6.QtGui import QAction, QKeySequence, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QComboBox, QDoubleSpinBox,
     QFileDialog, QFormLayout, QFrame, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QProgressBar, QInputDialog,
+    QListWidget, QListWidgetItem, QMainWindow, QMessageBox, QProgressBar, QInputDialog, QDockWidget, QMenu,
     QPushButton, QScrollArea, QSpinBox, QSplitter, QTabWidget, QToolBar,
     QVBoxLayout, QWidget,
 )
@@ -21,6 +21,7 @@ from docx_formatting import FormatError
 from v06_patch import current_values
 from v06_plan import build_plan, intent, resolve_scope
 from v06_session import EditingSession, source_font_warnings
+from lesson_regions import default_settings, review_regions, binding as region_binding
 
 
 class Job(QThread):
@@ -79,7 +80,7 @@ class PageView(QWidget):
             self.page.resize(rendered.width() + 32, rendered.height() + 32)
         else:
             self.page.clear()
-            self.page.setText("此版本没有这一页")
+            self.page.setText("打开一份教案，查看并整理格式" if self.pixmap is None else "此版本没有这一页")
             self.page.resize(260, 100)
 
     def resizeEvent(self, event):
@@ -210,6 +211,11 @@ class MainWindow(QMainWindow):
         self.state = self.model = self.job = None
         self.template_workspace = self.template_baseline = None
         self.template_source = None
+        self.standard_mode = 'regions'
+        self.region_settings, self.heading_policy = default_settings(), 'preserve'
+        self.organized = set()
+        self.needs_organize = True
+        self.region_notices = []
         self.after_job = None
         self.previews = {}
         self.setWindowTitle("文序 · Windows 桌面版")
@@ -220,16 +226,32 @@ class MainWindow(QMainWindow):
         self.addToolBar(self.toolbar)
         self.open_action = self.action("打开文档", self.choose_file, QKeySequence.StandardKey.Open)
         self.undo_action = self.action("撤销", self.undo, QKeySequence.StandardKey.Undo)
-        self.toolbar.addSeparator()
+        self.toolbar.removeAction(self.undo_action)
+        self.addAction(self.undo_action)
         self.versions = QComboBox()
         self.versions.setMinimumWidth(145)
         self.versions.setAccessibleName("当前版本")
         self.versions.activated.connect(self.choose_version)
-        self.toolbar.addWidget(self.versions)
-        self.toolbar.addSeparator()
         self.save_action = self.action("另存副本", self.choose_save, QKeySequence.StandardKey.SaveAs)
-        self.toolbar.addSeparator()
-        self.action("关于", self.about)
+        self.toolbar.removeAction(self.save_action)
+        self.addAction(self.save_action)
+        self.standard_label = QLabel('金标准 · 教案四组区域')
+        self.standard_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.standard_label.setMaximumWidth(360)
+        self.toolbar.addWidget(self.standard_label)
+        self.adjust_action = self.action('调整金标准', self.adjust_standard)
+        spacer = QWidget()
+        from PySide6.QtWidgets import QSizePolicy
+        spacer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.toolbar.addWidget(spacer)
+        self.primary = QPushButton('按金标准整理')
+        self.primary.setObjectName('primary')
+        self.primary.clicked.connect(self.primary_action)
+        self.toolbar.addWidget(self.primary)
+        self.more = QPushButton('更多')
+        self.more_menu = QMenu(self.more)
+        self.more.setMenu(self.more_menu)
+        self.toolbar.addWidget(self.more)
         root = QWidget()
         layout = QVBoxLayout(root)
         layout.setContentsMargins(16, 12, 16, 10)
@@ -261,14 +283,15 @@ class MainWindow(QMainWindow):
         self.requirements_button.clicked.connect(self.show_manual_items)
         template_row.addWidget(self.requirements_button)
         self.requirements_button.hide()
-        layout.addWidget(self.template_bar)
+        self.template_bar.hide()
+        self.template_bar.setParent(root)
         split = QSplitter()
         layout.addWidget(split, 1)
         workspace = QWidget()
         center = QVBoxLayout(workspace)
         center.setContentsMargins(0, 0, 8, 0)
         navigation = QHBoxLayout()
-        self.compare = QCheckBox("对照原稿")
+        self.compare = QCheckBox("查看原稿")
         self.compare.toggled.connect(self.show_pages)
         navigation.addWidget(self.compare)
         navigation.addStretch()
@@ -288,17 +311,20 @@ class MainWindow(QMainWindow):
         panes = QHBoxLayout()
         self.original_view = PageView("原稿")
         self.current_view = PageView("当前版本")
-        panes.addWidget(self.original_view, 1)
+        self.original_view.setParent(root)
         panes.addWidget(self.current_view, 1)
         self.original_view.hide()
         center.addLayout(panes, 1)
         self.reviewed = QCheckBox("已核对当前版本的预览")
         self.reviewed.toggled.connect(self.mark_reviewed)
-        center.addWidget(self.reviewed)
+        self.reviewed.setParent(root)
+        self.reviewed.hide()
         split.addWidget(workspace)
         self.sidebar = QWidget()
         side = QVBoxLayout(self.sidebar)
         side.setContentsMargins(12, 0, 0, 0)
+        side.addWidget(QLabel('版本历史'))
+        side.addWidget(self.versions)
         side.addWidget(QLabel("修改范围"))
         self.scope = QComboBox()
         self.scope.currentIndexChanged.connect(self.scope_changed)
@@ -349,12 +375,25 @@ class MainWindow(QMainWindow):
         self.apply_button.setObjectName("primary")
         self.apply_button.clicked.connect(self.apply)
         side.addWidget(self.apply_button)
-        split.addWidget(self.sidebar)
-        split.setSizes([880, 330])
-        split.setStretchFactor(0, 1)
-        split.setStretchFactor(1, 0)
+        self.editor_dock = QDockWidget('局部编辑与版本', self)
+        self.editor_dock.setWidget(self.sidebar)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.editor_dock)
+        self.editor_dock.hide()
         self.sidebar.setMinimumWidth(285)
         self.sidebar.setMaximumWidth(430)
+        self.more_menu.addAction(self.editor_dock.toggleViewAction())
+        self.more_menu.addAction(self.undo_action)
+        self.more_menu.addAction(self.save_action)
+        self.more_menu.addAction('重新按当前金标准整理', self.organize)
+        self.more_menu.addAction('本次识别与保留项', self.show_region_notices)
+        self.more_menu.addSeparator()
+        self.more_menu.addAction('导入模板…', self.choose_template)
+        self.more_menu.addAction('核对模板旁批…', self.review_template)
+        self.more_menu.addAction('导出模板包…', self.export_template)
+        self.more_menu.addAction('切换为教案四组区域标准', self.use_region_standard)
+        self.more_menu.addAction('未自动验证事项…', self.show_manual_items)
+        self.more_menu.addSeparator()
+        self.more_menu.addAction('关于', self.about)
         self.setCentralWidget(root)
         self.progress = QProgressBar()
         self.progress.setRange(0, 0)
@@ -427,6 +466,7 @@ class MainWindow(QMainWindow):
             self.error(exc)
         finally:
             job.deleteLater()
+            self.refresh_enabled()
 
     def refresh_enabled(self):
         ready = self.state is not None and self.job is None
@@ -434,13 +474,118 @@ class MainWindow(QMainWindow):
         self.sidebar.setEnabled(ready)
         self.versions.setEnabled(ready)
         self.undo_action.setEnabled(ready and self.state.session.current != "original")
-        self.save_action.setEnabled(ready and (self.state.session.current == "original" or self.reviewed.isChecked()))
+        self.save_action.setEnabled(ready)
+        self.adjust_action.setEnabled(self.job is None and (self.state is not None or self.template_workspace is not None or self.template_baseline is not None))
+        self.more.setEnabled(self.job is None)
+        self.compare.setEnabled(ready)
+        saved = ready and self.state.session.current in self.state.saved
+        self.primary.setEnabled(self.job is None and (self.state is None or self.needs_organize or not saved))
+        self.primary.setText('打开教案' if self.state is None else '按金标准整理' if self.needs_organize else '已保存副本' if saved else '保存修改后' if self.compare.isChecked() else '保存副本')
+        self.standard_label.setText('金标准 · ' + ('教案四组区域' if self.standard_mode == 'regions' else self.template_baseline.name if self.template_baseline else '模板待核对'))
+        self.standard_label.setToolTip(self.standard_label.text())
         self.reviewed.setEnabled(ready and self.state.session.current != "original")
         self.import_template_button.setEnabled(self.job is None)
         self.review_template_button.setEnabled(self.job is None and self.template_workspace is not None)
         self.apply_template_button.setEnabled(ready and self.template_baseline is not None)
         self.export_template_button.setEnabled(self.job is None and self.template_baseline is not None)
         self.requirements_button.setEnabled(self.job is None)
+
+    def primary_action(self):
+        if self.state is None:
+            self.choose_file()
+        elif self.needs_organize:
+            self.organize()
+        else:
+            self.choose_save()
+
+    def organize(self):
+        if self.standard_mode == 'template':
+            if self.template_baseline:
+                self.apply_template()
+            else:
+                self.review_template()
+        else:
+            self.apply_region_standard(self.region_settings, self.heading_policy)
+
+    def use_region_standard(self):
+        self.standard_mode = 'regions'
+        self.needs_organize = True
+        self.refresh_enabled()
+        self.notice.setText('已选择教案四组区域标准，点击“按金标准整理”查看结果。')
+
+    def show_region_notices(self):
+        QMessageBox.information(self, '本次识别与保留项', '\n'.join(self.region_notices) or '尚未按四组区域标准整理。')
+
+    def adjust_standard(self):
+        if self.job:
+            return
+        from desktop.standard_dialog import StandardDialog
+        profile = None
+        if self.standard_mode == 'template':
+            profile = self.template_workspace.region_standard if self.template_workspace else self.template_baseline.region_standard if self.template_baseline else None
+        settings, policy = (profile['settings'], profile['heading_policy']) if profile else (self.region_settings, self.heading_policy)
+        session = self.state.session if self.state else self.template_workspace.session if self.template_workspace else None
+        fonts = session.environment.get('font_families', []) if session else ['宋体', '黑体']
+        dialog = StandardDialog(settings, policy, fonts, self)
+        if not dialog.exec():
+            return
+        settings, policy = dialog.values()
+        if self.standard_mode == 'regions':
+            self.apply_region_standard(settings, policy)
+            return
+        # Work on an isolated candidate: cancel or a failed validation leaves the
+        # adopted baseline and the user's manuscript untouched.
+        def update_template():
+            candidate = self.template_workspace.clone() if self.template_workspace else self.template_baseline.workspace(loader=self.template_session_loader)
+            candidate.set_region_standard(settings, policy)
+            candidate.calibrate(environment=candidate.session.environment)
+            return candidate
+        def inspect(candidate):
+            from desktop.template_dialog import TemplateDialog
+            review_dialog = TemplateDialog(candidate, self)
+            review_dialog.tabs.setCurrentIndex(2)
+            review_dialog.setWindowTitle('核对修订后的金标准')
+            review_dialog.tabs.tabBar().hide()
+            review_dialog.calibrate_button.hide()
+            review_dialog.save_button.hide()
+            review_dialog.adopt_button.setText('采用并整理教案' if self.state else '采用此金标准')
+            if review_dialog.exec():
+                self.template_workspace, self.template_baseline = candidate, review_dialog.baseline
+                self.needs_organize = True
+                self.refresh_enabled()
+                self.notice.setText('金标准模板已实际修正并校验；点击“按金标准整理”应用到当前教案。')
+                if self.state:
+                    self.apply_template()
+        self.start_job('正在修正并重新校验金标准模板…', update_template, inspect)
+
+    def apply_region_standard(self, settings, policy='preserve'):
+        if not self.state or self.job:
+            return
+        try:
+            review = review_regions(self.model, settings, policy, self.state.protected_scopes())
+            if review.blockers:
+                raise FormatError('\n'.join(review.blockers))
+            binding = region_binding(settings, policy)
+            session, model = self.state.session, self.model
+            def execute():
+                if not review.differences:
+                    return None
+                version, _ = session.execute(model, review.plan, environment=session.environment, template_binding=binding)
+                return (version, session.preview(version.id)) if version else None
+            def finish(result):
+                self.region_settings = {key: dict(value) for key, value in settings.items()}
+                self.heading_policy = policy
+                self.standard_mode = 'regions'
+                if result is None:
+                    self.state.select_template(binding, review.protections)
+                self.applied(result)
+                mapping = review.region_mapping
+                counts = '、'.join(str(len(mapping.groups[key])) for key in ('headers', 'content', 'activities', 'closing'))
+                self.region_notices = [f'行列头／教学内容／活动意图／特殊行：分别识别 {counts} 个段落。', *review.notices]
+                self.notice.setText('已按四组区域标准核验，文字与表格结构保持不变。' + (f' {len(review.notices)} 项保留说明可在“更多”查看。' if review.notices else '') + ' 核对预览后保存副本。')
+            self.start_job('正在按教案区域整理并校验…', execute, finish)
+        except Exception as exc:
+            self.error(exc)
 
     def choose_file(self):
         if not self.confirm_discard():
@@ -475,6 +620,7 @@ class MainWindow(QMainWindow):
 
     def template_loaded(self, result):
         self.template_source, self.template_workspace, self.template_baseline, review = result
+        self.standard_mode, self.needs_organize = 'template', True
         if self.template_baseline:
             self.template_status.setText('模板样式已提取：' + self.template_baseline.name
                                          if self.template_baseline.basis_kind == 'sample_styles'
@@ -486,15 +632,15 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage('模板已读取；工作教案保持当前版本')
 
     def review_template(self):
-        if not self.template_workspace or self.job:
+        if not (self.template_workspace or self.template_baseline) or self.job:
             return
         from desktop.template_dialog import TemplateDialog
-        dialog = TemplateDialog(self.template_workspace, self)
-        # Editing a candidate invalidates its previously adopted baseline.
+        candidate = self.template_workspace.clone() if self.template_workspace else self.template_baseline.workspace(loader=self.template_session_loader)
+        dialog = TemplateDialog(candidate, self)
         if dialog.exec():
+            self.template_workspace = candidate
             self.template_baseline = dialog.baseline
-        elif dialog.changed:
-            self.template_baseline = None
+            self.needs_organize = True
         if self.template_baseline:
             self.template_status.setText('金标准：' + self.template_baseline.name)
         else:
@@ -634,6 +780,9 @@ class MainWindow(QMainWindow):
 
     def loaded(self, value):
         self.state, self.model, preview = value
+        self.organized.clear()
+        self.region_notices = []
+        self.needs_organize = True
         self.previews = {"original": preview}
         self.compare.setChecked(False)
         self.page_number.setValue(1)
@@ -641,7 +790,7 @@ class MainWindow(QMainWindow):
         self.heading.setTextFormat(Qt.TextFormat.PlainText)
         self.setWindowTitle(self.state.source.name + " — 文序")
         warnings = source_font_warnings(self.model, self.state.session.environment)
-        self.notice.setText("原稿已保留。" + (" ".join(warnings) if warnings else "选择范围和格式后应用修改。"))
+        self.notice.setText("原稿已保留。" + (" ".join(warnings) if warnings else "按金标准整理，再核对预览并保存副本。"))
         self.sync_version()
         self.statusBar().showMessage("已打开 · " + str(preview["pages"]) + " 页 · 保留 " + self.state.source.suffix.upper() + " 格式")
 
@@ -763,24 +912,30 @@ class MainWindow(QMainWindow):
             self.error(exc)
 
     def applied(self, result):
+        self.needs_organize = False
+        self.compare.setChecked(False)
         if result is None:
+            self.organized.add(self.state.session.current)
+            self.refresh_enabled()
             self.statusBar().showMessage("所选内容已经符合要求，无需修改；没有新增版本。")
             return
         version, preview = result
         self.state.session.select(version.id)
+        self.organized.add(version.id)
         self.model = self.state.model()
         self.previews[version.id] = preview
         self.sync_version()
         report = json.loads(version.report_json)
         self.notice.setText(f"已应用修改 · {report['pages_before']} → {report['pages_after']} 页。请核对预览后另存副本。")
         if self.manual_items():
-            self.notice.setText(self.notice.text() + f' 另有 {len(self.manual_items())} 项要求未自动验证，可在上方查看。')
+            self.notice.setText(self.notice.text() + f' 另有 {len(self.manual_items())} 项要求未自动验证，可在“更多”查看。')
         self.statusBar().showMessage("修改成功 · " + version.name)
 
     def choose_version(self, index):
         if not self.state or self.job:
             return
         self.state.session.select(self.versions.itemData(index))
+        self.needs_organize = self.state.session.current not in self.organized
         self.model = self.state.model()
         self.sync_version()
         self.notice.setText("已切换版本。后续修改基于当前版本，原稿始终保留。")
@@ -788,30 +943,30 @@ class MainWindow(QMainWindow):
     def undo(self):
         if self.state and not self.job:
             self.state.session.undo()
+            self.needs_organize = self.state.session.current not in self.organized
             self.model = self.state.model()
             self.sync_version()
             self.notice.setText("已撤销到上一版本；可在版本列表中返回后续版本。")
 
     def show_pages(self):
-        self.original_view.setVisible(self.compare.isChecked())
         if not self.state:
             return
         current = self.previews[self.state.session.current]
         original = self.previews["original"]
-        count = max(current["pages"], original["pages"]) if self.compare.isChecked() else current["pages"]
+        preview = original if self.compare.isChecked() else current
+        count = preview['pages']
         self.page_number.blockSignals(True)
         self.page_number.setMaximum(count)
         self.page_number.blockSignals(False)
         self.page_count.setText("/ " + str(count))
         index, zoom = self.page_number.value() - 1, self.zoom.currentData()
-        for view, preview in ((self.original_view, original), (self.current_view, current)):
-            view.show_page(preview["images"][index] if index < len(preview["images"]) else None, zoom)
-        self.current_view.title.setText("当前版本 · " + self.state.session.current + f" · {current['pages']} 页")
+        self.current_view.show_page(preview["images"][index] if index < len(preview["images"]) else None, zoom)
+        self.current_view.title.setText('原稿 · 仅供对照，保存仍为修改后文件' if self.compare.isChecked() else '效果预览 · ' + self.state.session.current + f" · {current['pages']} 页")
         binding = self.state.template_binding() or json.loads(self.state.session.versions[self.state.session.current].template_json)
-        if binding:
+        if binding and not self.compare.isChecked():
             self.current_view.title.setText(self.current_view.title.text() + ' · 依据模板：' + binding['name'])
-        self.original_view.resize_timer.start(0)
         self.current_view.resize_timer.start(0)
+        self.refresh_enabled()
 
     def mark_reviewed(self, checked):
         if self.state:
@@ -838,6 +993,7 @@ class MainWindow(QMainWindow):
                                                   QMessageBox.StandardButton.No) != QMessageBox.StandardButton.Yes:
                 return
             state = self.state
+            state.reviewed.add(version.id)
             protected = [self.template_source] if self.template_source else []
             self.start_job("正在保存副本…", lambda: state.save(path, overwrite=overwrite, protected=protected),
                            lambda saved: self.statusBar().showMessage("已保存：" + str(saved)))

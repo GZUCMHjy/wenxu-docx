@@ -54,6 +54,21 @@ def template_fixture():
     return output.getvalue()
 
 
+def lesson_fixture():
+    document = Document(BytesIO(template_fixture()))
+    table = document.add_table(rows=5, cols=4)
+    table.style = 'Table Grid'
+    for col, label in enumerate(('教学环节', '教学内容', '师生活动', '设计意图')):
+        table.cell(0, col).text = label
+    for row, stage in enumerate(('新课探究', 'Summary（6 min）', 'Homework（2 min）', '板书设计'), 1):
+        table.cell(row, 0).text = stage
+        for col, text in enumerate(('观察例题，归纳方法，完成练习。', '教师提问，学生讨论并说明理由。', '巩固方法，检查理解。'), 1):
+            table.cell(row, col).text = text
+    table.cell(2, 1).merge(table.cell(2, 3))
+    output = BytesIO(); document.save(output)
+    return output.getvalue()
+
+
 def start(window, directory):
     root = Path(directory).resolve()
     root.mkdir(parents=True, exist_ok=True)
@@ -158,6 +173,28 @@ def start(window, directory):
                               template_version=window.state.session.current)
                 phase = 7
             elif phase == 7:
+                teaching = run_dir / 'lesson.docx'
+                teaching.write_bytes(lesson_fixture())
+                report['passed'] = False
+                window.use_region_standard()
+                phase = 8
+                window.open_path(teaching)
+            elif phase == 8:
+                assert not window.editor_dock.isVisible()
+                assert window.primary.text() == '按金标准整理'
+                phase = 9
+                window.primary.click()
+            elif phase == 9:
+                from lesson_regions import review_regions
+                assert window.primary.text() == '保存副本'
+                reviewed = review_regions(window.model)
+                assert not reviewed.blockers and not reviewed.differences
+                phase = 10
+            elif phase == 10:
+                assert (run_dir / 'lesson.docx').read_bytes() == window.state.session.original
+                window.state.reviewed.add(window.state.session.current)
+                window.state.save(run_dir / 'lesson-result.docx')
+                report.update(passed=True, regions_applied=True, preview_first=True)
                 window.grab().save(str(run_dir / 'window.png'))
                 finish()
         except Exception as exc:

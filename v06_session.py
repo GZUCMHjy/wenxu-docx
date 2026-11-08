@@ -224,10 +224,10 @@ class EditingSession:
             raise FormatError("；".join(self.conversion["blocking_issues"]))
         binding = json.loads(source.template_json) if template_binding is None else template_binding
         if not isinstance(binding, dict) or (binding and (
-                binding.get('basis_kind') not in {'sample_styles', 'comment_calibrated'}
+                binding.get('basis_kind') not in {'sample_styles', 'comment_calibrated', 'lesson_regions'}
                 or not isinstance(binding.get('name'), str) or not binding['name'].strip()
                 or any(not isinstance(binding.get(k), str) or len(binding[k]) != 64
-                       or set(binding[k]) - set('0123456789abcdef') for k in ('fingerprint', 'file_hash')))):
+                       or set(binding[k]) - set('0123456789abcdef') for k in ('fingerprint', 'definition_hash' if binding.get('basis_kind') == 'lesson_regions' else 'file_hash')))):
             raise FormatError('模板来源记录无效，请重新导入模板。')
         binding_json = encode(binding)
         env = environment or render_environment()
